@@ -12,7 +12,7 @@ def aiomisc_test_timeout():
 
 class UnavailableDbServer(aiomisc.service.TCPServer):
     async def handle_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
     ):
         while await reader.read(65534):
             pass
@@ -27,12 +27,12 @@ def db_server_port(aiomisc_unused_port_factory) -> int:
 
 @pytest.fixture
 def services(db_server_port, localhost):
-    return[] #  [UnavailableDbServer(port=db_server_port, address=localhost)]
+    return[]   # [UnavailableDbServer(port=db_server_port, address=localhost)]
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def pg_dsn() -> str:
     return os.environ.get(
         "PG_DSN",
-        "postgres://pguser:pguser@localhost:5432/pgdb"
+        "postgres://test:test@localhost:5432/test",
     )

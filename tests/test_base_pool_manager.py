@@ -64,7 +64,9 @@ async def test_ready_min_count_hosts(pool_manager: BasePoolManager):
 
 
 @pytest.mark.parametrize(
-    ["masters_count", "replicas_count"], [[-1, 5], [2, -10], [1, None], [None, 2],],
+    ["masters_count", "replicas_count"], [
+        [-1, 5], [2, -10], [1, None], [None, 2],
+    ],
 )
 async def test_ready_with_invalid_arguments(
     pool_manager: BasePoolManager,
@@ -163,7 +165,9 @@ async def test_acquire_replica_with_fallback_master_is_true(
     await pool_manager.wait_next_pool_check()
     assert pool_manager.replica_pool_count == 0
     async with timeout_context(1):
-        async with pool_manager.acquire_replica(fallback_master=True) as connection:
+        async with pool_manager.acquire_replica(
+            fallback_master=True,
+        ) as connection:
             assert connection in master_pool.used
 
 
@@ -191,7 +195,9 @@ async def test_close(pool_manager: BasePoolManager):
     assert pool_manager.replica_pool_count == 0
     for pool in pool_manager:
         assert pool is not None
-        assert all(pool_manager.is_connection_closed(conn) for conn in pool.connections)
+        assert all(
+            pool_manager.is_connection_closed(conn) for conn in pool.connections
+        )
         assert all(conn.close.call_count == 1 for conn in pool.connections)
 
 
@@ -204,7 +210,9 @@ async def test_terminate(pool_manager: BasePoolManager):
     assert pool_manager.replica_pool_count == 0
     for pool in pool_manager:
         assert pool is not None
-        assert all(pool_manager.is_connection_closed(conn) for conn in pool.connections)
+        assert all(
+            pool_manager.is_connection_closed(conn) for conn in pool.connections
+        )
         assert all(conn.terminate.call_count == 1 for conn in pool.connections)
 
 

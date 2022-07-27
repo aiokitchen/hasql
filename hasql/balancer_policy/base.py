@@ -1,18 +1,20 @@
 import random
 from abc import abstractmethod
-from typing import Optional
+from typing import Any, Optional
+
+from ..base import AbstractBalancerPolicy, BasePoolManager
 
 
-class BaseBalancerPolicy:
-    def __init__(self, pool_manager):
+class BaseBalancerPolicy(AbstractBalancerPolicy):
+    def __init__(self, pool_manager: BasePoolManager):
         self._pool_manager = pool_manager
 
     async def get_pool(
-            self,
-            read_only: bool,
-            fallback_master: Optional[bool] = None,
-            master_as_replica_weight: Optional[float] = None
-    ):
+        self,
+        read_only: bool,
+        fallback_master: bool = False,
+        master_as_replica_weight: Optional[float] = None,
+    ) -> Any:
         if not read_only and master_as_replica_weight is not None:
             raise ValueError(
                 "Field master_as_replica_weight is used only when "
@@ -32,10 +34,10 @@ class BaseBalancerPolicy:
 
     @abstractmethod
     async def _get_pool(
-            self,
-            read_only: bool,
-            fallback_master: Optional[bool] = None,
-            choose_master_as_replica: bool = False
+        self,
+        read_only: bool,
+        fallback_master: bool = False,
+        choose_master_as_replica: bool = False,
     ):
         pass
 

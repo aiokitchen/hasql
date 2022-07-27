@@ -16,4 +16,4 @@ class PoolManager(AioPgPoolManager):
         )
 
 
-__all__ = ["PoolManager"]
+__all__ = ("PoolManager",)

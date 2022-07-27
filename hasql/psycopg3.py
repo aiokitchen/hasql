@@ -1,19 +1,19 @@
 from typing import Optional
 
-from hasql import AsyncConnection, errors
-from hasql_pool import AsyncConnectionPool
+from psycopg import AsyncConnection, errors
+from psycopg_pool import AsyncConnectionPool
 
-from hasql.base import BasePoolManager
-from hasql.utils import Dsn
+from .base import BasePoolManager
+from .utils import Dsn
 
 
 class PoolAcquireContext:
-    __slots__ = ('timeout', 'connection', 'done', 'pool')
+    __slots__ = ("timeout", "connection", "done", "pool")
 
     def __init__(
         self,
         pool: AsyncConnectionPool,
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
     ):
         self.pool = pool
         self.timeout = timeout
@@ -22,7 +22,7 @@ class PoolAcquireContext:
 
     async def __aenter__(self):
         if self.connection is not None or self.done:
-            raise errors.InterfaceError('a connection is already acquired')
+            raise errors.InterfaceError("a connection is already acquired")
         self.connection = await self.pool.getconn(self.timeout)
         return self.connection
 
@@ -54,7 +54,7 @@ class PoolManager(BasePoolManager):
     async def _is_master(self, connection: AsyncConnection):
         async with connection.cursor() as cur:
             await cur.execute("SHOW transaction_read_only")
-            return (await cur.fetchone())[0] == "off"
+            return (await cur.fetchone())[0] == "off"       # type: ignore
 
     async def _pool_factory(self, dsn: Dsn) -> AsyncConnectionPool:
         pool = AsyncConnectionPool(
@@ -71,11 +71,11 @@ class PoolManager(BasePoolManager):
     async def _close(self, pool: AsyncConnectionPool):
         await pool.close()
 
-    def _terminate(self, pool: AsyncConnectionPool):
+    async def _terminate(self, pool: AsyncConnectionPool):
         pass
 
     def is_connection_closed(self, connection):
         return connection.closed
 
 
-__all__ = ["PoolManager"]
+__all__ = ("PoolManager",)

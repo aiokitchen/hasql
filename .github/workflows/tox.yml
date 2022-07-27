@@ -1,0 +1,65 @@
+name: tox
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  lint:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        linter:
+          - lint
+          - checkdoc
+          - mypy
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: tox ${{ matrix.linter }}
+        uses: docker://snakepacker/python:all
+        env:
+          TOXENV: ${{ matrix.linter }}
+        with:
+          args: tox
+
+  build:
+    needs: lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: mdillon/postgis:11-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        toxenv:
+          - py37
+          - py38
+          - py39
+          - py310
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: tox ${{ matrix.toxenv }}
+        uses: docker://snakepacker/python:all
+        env:
+          FORCE_COLOR: 1
+          TOXENV: ${{ matrix.toxenv }}
+          PG_DSN: postgres://test:test@postgres:5432/test
+          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+        with:
+          args: /bin/bash -c "wait-for-port postgres:5432 && tox"

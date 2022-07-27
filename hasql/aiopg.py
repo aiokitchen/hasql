@@ -1,3 +1,5 @@
+import asyncio
+
 import aiopg
 
 from hasql.base import BasePoolManager
@@ -35,11 +37,12 @@ class PoolManager(BasePoolManager):
         pool.close()
         await pool.wait_closed()
 
-    def _terminate(self, pool):
-        pool.terminate()
+    async def _terminate(self, pool):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, pool.terminate)
 
     def is_connection_closed(self, connection):
         return connection.closed
 
 
-__all__ = ["PoolManager"]
+__all__ = ("PoolManager",)

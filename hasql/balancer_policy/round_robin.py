@@ -24,7 +24,7 @@ class RoundRobinBalancerPolicy(BaseBalancerPolicy):
             self,
             read_only: bool,
             fallback_master: Optional[bool] = None,
-            choose_master_as_replica: bool = False
+            choose_master_as_replica: bool = False,
     ):
         if read_only:
             if self._pool_manager.replica_pool_count == 0:
@@ -63,4 +63,4 @@ class RoundRobinBalancerPolicy(BaseBalancerPolicy):
         return self._master_predicate(pool) or self._replica_predicate(pool)
 
 
-__all__ = ["RoundRobinBalancerPolicy"]
+__all__ = ("RoundRobinBalancerPolicy",)

@@ -16,3 +16,5 @@ version.py
 .coverage
 .tox/
 htmlcov/
+/.venv*
+

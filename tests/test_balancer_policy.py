@@ -4,8 +4,7 @@ import pytest
 from async_timeout import timeout
 
 from hasql.balancer_policy import (
-    GreedyBalancerPolicy,
-    RandomWeightedBalancerPolicy,
+    GreedyBalancerPolicy, RandomWeightedBalancerPolicy,
     RoundRobinBalancerPolicy,
 )
 from tests.mocks import TestPoolManager
@@ -13,7 +12,11 @@ from tests.mocks import TestPoolManager
 
 balancer_policies = pytest.mark.parametrize(
     "balancer_policy",
-    [GreedyBalancerPolicy, RandomWeightedBalancerPolicy, RoundRobinBalancerPolicy,],
+    [
+        GreedyBalancerPolicy,
+        RandomWeightedBalancerPolicy,
+        RoundRobinBalancerPolicy,
+    ],
 )
 
 
@@ -61,7 +64,9 @@ async def test_acquire_replica(make_pool_manager, balancer_policy):
 
 
 @balancer_policies
-async def test_acquire_replica_with_fallback_master(make_pool_manager, balancer_policy):
+async def test_acquire_replica_with_fallback_master(
+    make_pool_manager, balancer_policy,
+):
     pool_manager = await make_pool_manager(balancer_policy, replicas_count=0)
     async with timeout(1):
         async with pool_manager.acquire_replica(fallback_master=True) as conn:
@@ -72,13 +77,17 @@ async def test_acquire_replica_with_fallback_master(make_pool_manager, balancer_
 async def test_acquire_master_as_replica(make_pool_manager, balancer_policy):
     pool_manager = await make_pool_manager(balancer_policy, replicas_count=0)
     async with timeout(1):
-        async with pool_manager.acquire_replica(master_as_replica_weight=1.0,) as conn:
+        async with pool_manager.acquire_replica(
+            master_as_replica_weight=1.,
+        ) as conn:
             assert await conn.is_master()
 
 
 @balancer_policies
-async def test_dont_acquire_master_as_replica(make_pool_manager, balancer_policy):
+async def test_dont_acquire_master_as_replica(
+    make_pool_manager, balancer_policy,
+):
     pool_manager = await make_pool_manager(balancer_policy, replicas_count=0)
     with pytest.raises(asyncio.TimeoutError):
-        async with pool_manager.acquire_replica(master_as_replica_weight=0.0,):
+        async with pool_manager.acquire_replica(master_as_replica_weight=0.0):
             pass

@@ -1,8 +1,10 @@
-import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import (
-    create_async_engine, AsyncEngine, AsyncConnection
+import asyncio
+
+import sqlalchemy as sa  # type: ignore
+from sqlalchemy.ext.asyncio import (  # type: ignore
+    AsyncConnection, AsyncEngine, create_async_engine,
 )
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool  # type: ignore
 
 from hasql.base import BasePoolManager
 from hasql.utils import Dsn
@@ -16,7 +18,7 @@ class PoolManager(BasePoolManager):
     def acquire_from_pool(self, pool: AsyncEngine, **kwargs):
         return pool.connect()
 
-    async def release_to_pool(
+    async def release_to_pool(      # type: ignore
         self,
         connection: AsyncConnection,
         _: AsyncEngine,
@@ -26,7 +28,7 @@ class PoolManager(BasePoolManager):
 
     async def _is_master(self, connection: AsyncConnection):
         return await connection.scalar(
-            sa.text("SHOW transaction_read_only")
+            sa.text("SHOW transaction_read_only"),
         ) == "off"
 
     async def _pool_factory(self, dsn: Dsn):
@@ -41,12 +43,12 @@ class PoolManager(BasePoolManager):
     async def _close(self, pool: AsyncEngine):
         await pool.dispose()
 
-    def _terminate(self, pool: AsyncEngine):
-        # pool don't have terminate, use sync dispose instead
-        pool.sync_engine.dispose()
+    async def _terminate(self, pool: AsyncEngine):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, pool.sync_engine.dispose)
 
     def is_connection_closed(self, connection: AsyncConnection):
         return connection.closed
 
 
-__all__ = ["PoolManager"]
+__all__ = ("PoolManager",)

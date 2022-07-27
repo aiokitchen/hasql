@@ -6,7 +6,7 @@ from hasql.aiopg_sa import PoolManager
 
 @pytest.fixture
 async def pool_manager(pg_dsn):
-    pg_pool = PoolManager(dsn=pg_dsn, fallback_master=True,)
+    pg_pool = PoolManager(dsn=pg_dsn, fallback_master=True)
     try:
         await pg_pool.ready()
         yield pg_pool

@@ -1,23 +1,24 @@
 import random
-from typing import Optional
 
 from hasql.balancer_policy.base import BaseBalancerPolicy
 
 
 class GreedyBalancerPolicy(BaseBalancerPolicy):
     async def _get_pool(
-            self,
-            read_only: bool,
-            fallback_master: Optional[bool] = None,
-            choose_master_as_replica: bool = False
+        self,
+        read_only: bool,
+        fallback_master: bool = False,
+        choose_master_as_replica: bool = False,
     ):
         candidates = []
+
         if read_only:
             candidates.extend(
                 await self._pool_manager.get_replica_pools(
                     fallback_master=fallback_master,
                 ),
             )
+
         if (
                 not read_only or
                 (
@@ -36,4 +37,4 @@ class GreedyBalancerPolicy(BaseBalancerPolicy):
         ])
 
 
-__all__ = ["GreedyBalancerPolicy"]
+__all__ = ("GreedyBalancerPolicy",)

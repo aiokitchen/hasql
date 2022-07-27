@@ -1,8 +1,9 @@
-__version__ = "0.5.0"
+__version_info__ = (0, 9, 0)
+__version__ = ".".join(map(str, __version_info__))
 
 package_info = (
-    "hasql is a module for acquiring actual connections "
-    "with masters and replicas"
+    "hasql is a module for acquiring actual connections with masters "
+    "and replicas"
 )
 
 authors = (

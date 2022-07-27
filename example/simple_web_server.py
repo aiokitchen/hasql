@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 
 import aiohttp.web
 from aiohttp.web_urldispatcher import View
@@ -45,18 +46,25 @@ class ReplicaHandler(BaseView):
 
 
 class REST(AIOHTTPService):
-    async def create_application(self):
+    async def create_application(self) -> aiohttp.web.Application:
         app = aiohttp.web.Application()
 
         app.add_routes([
             aiohttp.web.get('/master', MasterHandler),
             aiohttp.web.get('/replica', ReplicaHandler),
         ])
-        app['pool'] = PoolManager(
+
+        pool_manager: PoolManager = PoolManager(
             arguments.dsn,
-            maxsize=arguments.pg_maxsize,
-            minsize=arguments.pg_minsize
+            pool_factory_kwargs=dict(
+                maxsize=arguments.pg_maxsize,
+                minsize=arguments.pg_minsize
+            )
         )
+
+        # Waiting for 1 master and 1 replica will be available
+        await pool_manager.ready(masters_count=1, replicas_count=1)
+        app['pool'] = pool_manager
 
         return app
 

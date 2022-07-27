@@ -118,11 +118,12 @@ class TestPoolManager(BasePoolManager):
     async def _close(self, pool: TestPool):
         await pool.close()
 
-    def _terminate(self, pool: TestPool):
-        pool.terminate()
+    async def _terminate(self, pool: TestPool):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, pool.terminate)
 
     def is_connection_closed(self, connection: TestConnection):
         return connection.is_closed
 
 
-__all__ = ["TestPoolManager"]
+__all__ = ("TestPoolManager",)

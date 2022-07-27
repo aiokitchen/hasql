@@ -9,10 +9,9 @@ async def pool_manager(pg_dsn):
     pg_pool = PoolManager(
         dsn=pg_dsn,
         fallback_master=True,
-        pool_factory_kwargs={"minsize": 10, "maxsize": 10,},
+        pool_factory_kwargs={"minsize": 10, "maxsize": 10},
     )
     try:
-        await pg_pool.ready()
         yield pg_pool
     finally:
         await pg_pool.close()

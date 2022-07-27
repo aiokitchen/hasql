@@ -1,4 +1,6 @@
-import asyncpg
+import asyncio
+
+import asyncpg  # type: ignore
 
 from hasql.base import BasePoolManager
 from hasql.utils import Dsn
@@ -29,11 +31,12 @@ class PoolManager(BasePoolManager):
     async def _close(self, pool):
         await pool.close()
 
-    def _terminate(self, pool):
-        pool.terminate()
+    async def _terminate(self, pool):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, pool.terminate)
 
     def is_connection_closed(self, connection):
         return connection.is_closed()
 
 
-__all__ = ["PoolManager"]
+__all__ = ("PoolManager",)

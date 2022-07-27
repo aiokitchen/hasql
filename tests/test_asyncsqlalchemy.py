@@ -34,7 +34,7 @@ async def test_acquire_without_context(pool_manager):
 
 async def test_close(pool_manager):
     sqlalchemy_pool: AsyncEngine = await pool_manager.balancer.get_pool(
-        read_only=False
+        read_only=False,
     )
     assert sqlalchemy_pool.sync_engine.pool.checkedout() > 0
     await pool_manager.close()
@@ -43,7 +43,7 @@ async def test_close(pool_manager):
 
 async def test_terminate(pool_manager):
     sqlalchemy_pool: AsyncEngine = await pool_manager.balancer.get_pool(
-        read_only=False
+        read_only=False,
     )
     assert sqlalchemy_pool.sync_engine.pool.overflow() == -10
     await pool_manager.terminate()

@@ -1,0 +1,26 @@
+version: "2"
+
+services:
+  postgres:
+    restart: always
+    image: mdillon/postgis:11-alpine
+    expose:
+      - 5432
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+
+  test:
+    image: snakepacker/python:all
+    working_dir: /mnt
+    command: >
+      bash -c  '
+        pip install -U pip tox && wait-for-port postgres:5432 && tox -r
+      '
+    environment:
+      PG_DSN: postgres://test:test@postgres:5432/test
+    volumes:
+      - .:/mnt
+    depends_on:
+      - postgres

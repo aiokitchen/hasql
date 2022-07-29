@@ -453,14 +453,14 @@ Overview
           pools if replicas are missing. False by default.
 
     * ``pool_is_master(pool)``
-        Returns True if connection is master.
+      Returns True if connection is master.
 
     * ``pool_is_replica(pool)``
-        Returns True if connection is replica.
+      Returns True if connection is replica.
 
     * ``register_connection(connection, pool)``
-        Match connection with the pool from which it was taken.
-        It is necessary for the release() method to work correctly.
+      Match connection with the pool from which it was taken.
+      It is necessary for the release() method to work correctly.
 
 * ``hasql.aiopg.PoolManager``
 

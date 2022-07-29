@@ -314,11 +314,13 @@ Overview
 
     * coroutine async-with ``acquire_from_pool(pool, **kwargs)``
       Acquire a connection from pool. Returns connection to the database.
+
         * ``pool`` - Pool from which you to be acquiring the connection.
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine ``release_to_pool(connection, pool, **kwargs)``
       A coroutine that reverts connection conn to pool for future recycling.
+
         * ``connection`` - Connection to be released.
         * ``pool`` - Pool to which you are returning the connection.
         * ``kwargs`` - Arguments to be passed to the pool release() method.

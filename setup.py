@@ -81,4 +81,9 @@ setup(
             "wheel",
         ],
     },
+    project_urls={
+        "Source": "https://github.com/aiokitchen/hasql",
+        "Tracker": "https://github.com/aiokitchen/hasql/issues",
+        "Documentation": "https://github.com/aiokitchen/hasql/blob/master/README.rst",
+    },
 )

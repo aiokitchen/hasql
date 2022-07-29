@@ -48,8 +48,8 @@ Database URL specirication rules
   * split result:
 
     * ``postgresql://db1:5432/``
-    * ``postgresql://db1:5432/``
-    * ``postgresql://db1:5432/``
+    * ``postgresql://db2:5432/``
+    * ``postgresql://db3:5432/``
 * The non-default port for each host might be passed after hostnames. e.g.
 
   * multihost example:
@@ -58,8 +58,8 @@ Database URL specirication rules
   * split result:
 
     * ``postgresql://db1:1234/``
-    * ``postgresql://db1:5678/``
-    * ``postgresql://db1:5432/``
+    * ``postgresql://db2:5678/``
+    * ``postgresql://db3:5432/``
 * The special case for non-default port for all hosts
 
   * multihost example:
@@ -68,8 +68,8 @@ Database URL specirication rules
   * split result:
 
     * ``postgresql://db1:6432/``
-    * ``postgresql://db1:6432/``
-    * ``postgresql://db1:6432/``
+    * ``postgresql://db2:6432/``
+    * ``postgresql://db3:6432/``
 
 
 For ``aiopg`` or ``aiopg.sa``

@@ -5,9 +5,8 @@
 hasql
 =====
 
-``hasql`` is a library for high available PostgreSQL clusters.
-
-Library for acquiring actual connections with masters and replicas.
+``hasql`` is a library for acquiring actual connections to masters and replicas
+in high available PostgreSQL clusters.
 
 .. image:: https://raw.githubusercontent.com/aiokitchen/hasql/master/resources/diagram.svg
 
@@ -21,7 +20,7 @@ Features
 * autodetection of hosts role changes, in case replica
   host will be promoted to master
 * different policies for load balancing
-* support ``asyncpg``, ``psycopg3`` and ``aiopg``
+* support for ``asyncpg``, ``psycopg3`` and ``aiopg``
 
 
 Usage
@@ -33,8 +32,8 @@ Creating connection pool
 ************************
 
 When acquiring a connection, the connection object of the used driver is
-returned (``aiopg.connection.Connection`` for **aiog** and
-`asyncpg.pool.PoolConnectionProxy` for **asyncpg** and **asyncpgsa**)
+returned (``aiopg.connection.Connection`` for **aiopg** and
+``asyncpg.pool.PoolConnectionProxy`` for **asyncpg** and **asyncpgsa**)
 
 
 Database URL specirication rules
@@ -476,11 +475,12 @@ Balancer policies
 =================
 
 * ``hasql.balancer_policy.GreedyBalancerPolicy``
-  Choice pool with the most free connections. If there are several such pools,
+  Chooses pool with the most free connections. If there are several such pools,
   a random one is taken.
 
 * ``hasql.balancer_policy.RandomWeightedBalancerPolicy``
-  Choice random pool according to their weights. The weight is inversely
-  proportional to the response time of the database of the respective pool.
+  Chooses random pool according to their weights. The weight is inversely
+  proportional to the response time of the database of the respective pool 
+  (faster response - higher weight).
 
 * ``hasql.balancer_policy.RoundRobinBalancerPolicy``

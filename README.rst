@@ -1,4 +1,4 @@
-.. image:: resources/logo.svg
+.. image:: https://raw.githubusercontent.com/aiokitchen/hasql/master/resources/logo.svg
    :width: 365
    :height: 265
 
@@ -9,7 +9,7 @@ hasql
 
 Library for acquiring actual connections with masters and replicas.
 
-.. image:: resources/diagram.svg
+.. image:: https://raw.githubusercontent.com/aiokitchen/hasql/master/resources/diagram.svg
 
 Features
 ========

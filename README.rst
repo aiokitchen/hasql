@@ -313,21 +313,21 @@ Overview
           free connections.
 
     * coroutine async-with ``acquire_from_pool(pool, **kwargs)``
-        Acquire a connection from pool. Returns connection to the database.
+      Acquire a connection from pool. Returns connection to the database.
         * ``pool`` - Pool from which you to be acquiring the connection.
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine ``release_to_pool(connection, pool, **kwargs)``
-        A coroutine that reverts connection conn to pool for future recycling.
+      A coroutine that reverts connection conn to pool for future recycling.
         * ``connection`` - Connection to be released.
         * ``pool`` - Pool to which you are returning the connection.
         * ``kwargs`` - Arguments to be passed to the pool release() method.
 
     * ``is_connection_closed(connection)``
-        Returns True if connection is closed.
+      Returns True if connection is closed.
 
     * ``get_last_response_time(pool)``
-        Returns database host last response time (in seconds).
+      Returns database host last response time (in seconds).
 
     * coroutine async-with
       ``acquire(read_only, fallback_master, timeout, **kwargs)``
@@ -359,15 +359,18 @@ Overview
 
         * ``fallback_master: Optional[bool]`` - Use connections from master if
           replicas are missing. If None, then the default value is used.
+
         * ``master_as_replica_weight: float`` - Probability of using the master
           as a replica (from 0. to 1.; 0. - master is not used as a replica;
           1. - master can be used as a replica).
+
         * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
           operations.
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine ``release(connection, **kwargs)``
-        A coroutine that reverts connection conn to pool for future recycling.
+      A coroutine that reverts connection conn to pool for future recycling.
+
         * ``connection`` - Connection to be released.
         * ``kwargs`` - Arguments to be passed to the pool release() method.
 
@@ -380,7 +383,7 @@ Overview
       connections also.
 
     * coroutine ``wait_next_pool_check(timeout)``
-        Waiting for the next step to update host roles.
+      Waiting for the next step to update host roles.
 
     * coroutine ``ready(masters_count, replicas_count, timeout)``
       Waiting for a connection to the database hosts. If masters_count is

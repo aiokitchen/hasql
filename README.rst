@@ -284,24 +284,33 @@ Overview
 
 * hasql.base.BasePoolManager
     * ``__init__(dsn, acquire_timeout, refresh_delay, refresh_timeout, fallback_master, master_as_replica_weight, balancer_policy, pool_factory_kwargs)``:
+
         * ``dsn: str`` - Connection string used by the connection.
+
         * ``acquire_timeout: Union[int, float]`` - Default timeout (in seconds)
           for connection operations. 1 sec by default.
+
         * ``refresh_delay: Union[int, float]`` - Delay time (in seconds)
           between host polls. 1 sec by default.
+
         * ``refresh_timeout: Union[int, float]`` - Timeout (in seconds) for
           trying to connect and get the host role. 1 sec by default.
+
         * ``fallback_master: bool`` - Use connections from master if replicas
           are missing. False by default.
+
         * ``master_as_replica_weight: float`` - Probability of using the master
           as a replica (from 0. to 1.; 0. - master is not used as a replica;
           1. - master can be used as a replica).
+
         * ``balancer_policy: type`` - Connection pool balancing policy
           (`hasql.balancer_policy.GreedyBalancerPolicy`,
           `hasql.balancer_policy.RandomWeightedBalancerPolicy` or
           `hasql.balancer_policy.RoundRobinBalancerPolicy`).
+
         * ``stopwatch_window_size: int`` - Window size for calculating the
           median response time of each pool.
+
         * ``pool_factory_kwargs: Optional[dict]`` - Connection pool creation
           parameters that are passed to pool factory.
 
@@ -316,13 +325,16 @@ Overview
       Acquire a connection from pool. Returns connection to the database.
 
         * ``pool`` - Pool from which you to be acquiring the connection.
+
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine ``release_to_pool(connection, pool, **kwargs)``
       A coroutine that reverts connection conn to pool for future recycling.
 
         * ``connection`` - Connection to be released.
+
         * ``pool`` - Pool to which you are returning the connection.
+
         * ``kwargs`` - Arguments to be passed to the pool release() method.
 
     * ``is_connection_closed(connection)``
@@ -337,13 +349,17 @@ Overview
 
         * ``readonly: bool`` - ``True`` if need return connection to replica,
           ``False`` - to master. False by default.
+
         * ``fallback_master: Optional[bool]`` - Use connections from master
           if replicas are missing. If None, then the default value is used.
+
         * ``master_as_replica_weight: float`` - Probability of using the master
           as a replica (from 0. to 1.; 0. - master is not used as a replica;
           1. - master can be used as a replica).
+
         * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
           operations.
+
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine async-with ``acquire_master(timeout, **kwargs)``
@@ -352,6 +368,7 @@ Overview
 
         * ``timeout: Union[int, float]`` - Timeout (in seconds) for
           connection operations.
+
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine async-with
@@ -368,6 +385,7 @@ Overview
 
         * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
           operations.
+
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
     * coroutine ``release(connection, **kwargs)``
@@ -394,8 +412,10 @@ Overview
 
         * ``masters_count: Optional[int]`` - Minimum number of master hosts.
           ``None`` by default.
+
         * ``replicas_count: Optional[int]`` - Minimum number of replica hosts.
           ``None`` by default.
+
         * ``timeout: Union[int, float]`` - Timeout for database connections.
           10 seconds by default.
 
@@ -419,6 +439,7 @@ Overview
 
         * ``readonly: bool`` - True if need return replica pool,
           ``False`` - master pool.
+
         * ``fallback_master: Optional[bool]`` - Returns master pool if
           replicas are missing. False by default.
 

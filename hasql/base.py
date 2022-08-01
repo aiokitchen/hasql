@@ -8,8 +8,6 @@ from typing import (
     Any, AsyncContextManager, DefaultDict, Dict, List, Optional, Set, Union,
 )
 
-from async_timeout import timeout as timeout_context
-
 from .utils import Dsn, Stopwatch, split_dsn
 
 
@@ -37,6 +35,7 @@ class AbstractBalancerPolicy(ABC):
 
 
 class PoolAcquireContext(AsyncContextManager):
+
     def __init__(
             self,
             pool_manager: "BasePoolManager",
@@ -70,7 +69,7 @@ class PoolAcquireContext(AsyncContextManager):
         return await asyncio.wait_for(execute(), timeout=self.timeout)
 
     async def __aenter__(self):
-        async with timeout_context(self.timeout):
+        async def go():
             self.pool = await self.pool_manager.balancer.get_pool(
                 read_only=self.read_only,
                 fallback_master=self.fallback_master,
@@ -81,6 +80,7 @@ class PoolAcquireContext(AsyncContextManager):
                 **self.kwargs,
             )
             return await self.context.__aenter__()
+        return await asyncio.wait_for(go(), timeout=self.timeout)
 
     async def __aexit__(self, *exc):
         await self.context.__aexit__(*exc)
@@ -344,18 +344,19 @@ class BasePoolManager(ABC):
         if replicas_count is not None and replicas_count < 0:
             raise ValueError("replicas_count shouldn't be negative")
 
-        async with timeout_context(timeout):
-            if masters_count is None and replicas_count is None:
-                await self.wait_all_ready()
-                return
+        if masters_count is None and replicas_count is None:
+            await asyncio.wait_for(self.wait_all_ready(), timeout=timeout)
+            return
 
-            assert isinstance(masters_count, int)
-            assert isinstance(replicas_count, int)
+        assert isinstance(masters_count, int)
+        assert isinstance(replicas_count, int)
 
-            await asyncio.gather(
+        await asyncio.wait_for(
+            asyncio.gather(
                 self.wait_masters_ready(masters_count),
                 self.wait_replicas_ready(replicas_count),
-            )
+            ), timeout=timeout,
+        )
 
     async def wait_all_ready(self):
         for dsn in self._dsn:
@@ -491,8 +492,10 @@ class BasePoolManager(ABC):
     async def _wait_creating_pool(self, dsn: Dsn):
         while not self._closing:
             try:
-                async with timeout_context(self._refresh_timeout):
-                    return await self._pool_factory(dsn)
+                return await asyncio.wait_for(
+                    self._pool_factory(dsn),
+                    timeout=self._refresh_timeout,
+                )
             except Exception:
                 logger.warning(
                     "Creating pool failed with exception for dsn=%s",

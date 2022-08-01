@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import AsyncExitStack
+
 import pytest
 from psycopg import AsyncConnection
 
@@ -5,11 +8,17 @@ from hasql.psycopg3 import PoolManager
 
 
 @pytest.fixture
-async def pool_manager(pg_dsn):
+def pool_size() -> int:
+    return 10
+
+
+@pytest.fixture
+async def pool_manager(pg_dsn, pool_size):
     pg_pool = PoolManager(
         dsn=pg_dsn,
         fallback_master=True,
-        pool_factory_kwargs={"min_size": 10, "max_size": 10},
+        acquire_timeout=1,
+        pool_factory_kwargs={"min_size": pool_size, "max_size": pool_size},
     )
     try:
         await pg_pool.ready()
@@ -54,3 +63,42 @@ async def test_is_connection_closed(pool_manager):
         assert not pool_manager.is_connection_closed(conn)
         await conn.close()
         assert pool_manager.is_connection_closed(conn)
+
+
+async def test_acquire_with_timeout_context(pool_manager, pool_size):
+    conns = []
+    for _ in range(pool_size):
+        conns.append(await pool_manager.acquire_master())
+
+    with pytest.raises(asyncio.TimeoutError):
+        await pool_manager.acquire_master()
+
+    for conn in conns:
+        await pool_manager.release(conn)
+    conns.clear()
+
+    for pool in pool_manager.pools:
+        assert pool_manager.get_pool_freesize(pool) == pool_size
+
+    for _ in range(pool_size):
+        async with pool_manager.acquire_master() as conn:
+            pass
+
+
+async def test_acquire_with_timeout_context2(pool_manager, pool_size):
+    async with AsyncExitStack() as stack:
+        for _ in range(pool_size):
+            await stack.enter_async_context(pool_manager.acquire_master())
+
+            async def wait_for_smth():
+                with pytest.raises(asyncio.TimeoutError):
+                    async with pool_manager.acquire_master():
+                        pass
+
+        await asyncio.gather(*[wait_for_smth() for _ in range(pool_size)])
+
+    for pool in pool_manager.pools:
+        assert pool_manager.get_pool_freesize(pool) == pool_size
+
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(pool_manager.acquire_master())

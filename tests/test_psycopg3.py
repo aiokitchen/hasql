@@ -3,6 +3,7 @@ from contextlib import AsyncExitStack
 
 import pytest
 from psycopg import AsyncConnection
+from psycopg_pool import TooManyRequests
 
 from hasql.psycopg3 import PoolManager
 
@@ -70,7 +71,7 @@ async def test_acquire_with_timeout_context(pool_manager, pool_size):
     for _ in range(pool_size):
         conns.append(await pool_manager.acquire_master())
 
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(TooManyRequests):
         await pool_manager.acquire_master()
 
     for conn in conns:
@@ -91,7 +92,7 @@ async def test_acquire_with_timeout_context2(pool_manager, pool_size):
             await stack.enter_async_context(pool_manager.acquire_master())
 
             async def wait_for_smth():
-                with pytest.raises(asyncio.TimeoutError):
+                with pytest.raises(TooManyRequests):
                     async with pool_manager.acquire_master():
                         pass
 

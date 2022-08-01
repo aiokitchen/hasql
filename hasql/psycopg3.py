@@ -37,17 +37,12 @@ class PoolAcquireContext:
 
 
 class PoolManager(BasePoolManager):
-    def __init__(
-        self,
-        dsn: str,
-        *args,
-        pool_factory_kwargs: Optional[dict] = None,
-        **kwargs,
-    ):
+    def __init__(self, dsn: str, **kwargs):
+        pool_factory_kwargs = kwargs.pop("pool_factory_kwargs", {})
         pool_factory_kwargs["max_waiting"] = -1
         super().__init__(
             dsn,
-            pool_factory_kwargs=pool_factory_kwargs, *args, **kwargs
+            pool_factory_kwargs=pool_factory_kwargs, **kwargs
         )
 
     def get_pool_freesize(self, pool: AsyncConnectionPool):

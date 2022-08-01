@@ -27,7 +27,7 @@ def db_server_port(aiomisc_unused_port_factory) -> int:
 
 @pytest.fixture
 def services(db_server_port, localhost):
-    return[]   # [UnavailableDbServer(port=db_server_port, address=localhost)]
+    return []   # [UnavailableDbServer(port=db_server_port, address=localhost)]
 
 
 @pytest.fixture(scope="session")

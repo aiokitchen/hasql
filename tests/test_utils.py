@@ -1,5 +1,5 @@
 from io import StringIO
-from typing import Optional, Union, Iterable
+from typing import Iterable, Optional, Union
 
 import pytest
 
@@ -103,7 +103,7 @@ def make_examples():
                 build_url(host=hosts, **case),
                 [
                     build_url(host=host, **case) for host in expected
-                ]
+                ],
             ]
 
 
@@ -112,7 +112,7 @@ MULTI_DSN_PORT_CASES = list(make_examples())
 
 @pytest.mark.parametrize(
     ["dsn", "expected_dsns"],
-    MULTI_DSN_PORT_CASES, ids=[dsn for dsn, _ in MULTI_DSN_PORT_CASES]
+    MULTI_DSN_PORT_CASES, ids=[dsn for dsn, _ in MULTI_DSN_PORT_CASES],
 )
 def test_multi_dsn_port(dsn: str, expected_dsns: Iterable[str]):
     for host_dsn, expected in zip(split_dsn(Dsn.parse(dsn)), expected_dsns):

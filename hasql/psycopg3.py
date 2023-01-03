@@ -1,9 +1,11 @@
-from typing import Optional
+from typing import Optional, Sequence, Iterable
 
 from psycopg import AsyncConnection, errors
+from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool
 
 from .base import BasePoolManager
+from .metrics import Metrics
 from .utils import Dsn
 
 
@@ -37,6 +39,8 @@ class PoolAcquireContext:
 
 
 class PoolManager(BasePoolManager):
+    pools: Iterable[AsyncConnectionPool]
+
     def __init__(self, dsn: str, **kwargs):
         pool_factory_kwargs = kwargs.pop("pool_factory_kwargs", {})
         pool_factory_kwargs["max_waiting"] = -1
@@ -84,6 +88,23 @@ class PoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection):
         return connection.closed
+
+    def metrics(self) -> Sequence[Metrics]:
+        stats = [
+            {
+                **p.get_stats(),
+                "host": conninfo_to_dict(p.conninfo)["host"]
+            } for p in self.pools
+        ]
+        return [
+            Metrics(
+                min=stat.get("pool_min"),
+                max=stat.get("pool_max"),
+                idle=stat.get("pool_available"),
+                used=stat.get("pool_size"),
+                host=stat.get("host"),
+            ) for stat in stats
+        ]
 
 
 __all__ = ("PoolManager",)

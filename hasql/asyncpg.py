@@ -1,12 +1,16 @@
 import asyncio
+from typing import Sequence, Iterable
 
 import asyncpg  # type: ignore
 
 from hasql.base import BasePoolManager
+from hasql.metrics import Metrics
 from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
+    pools: Iterable[asyncpg.Pool]
+
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()
 
@@ -37,6 +41,22 @@ class PoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection):
         return connection.is_closed()
+
+    def _parse_host(self, pool: asyncpg.Pool):
+        if len(pool._connect_args) != 1:
+            return ""
+        return Dsn.parse(pool._connect_args[0]).netloc
+
+    def metrics(self) -> Sequence[Metrics]:
+        return [
+            Metrics(
+                max=p.get_max_size(),
+                min=p.get_min_size(),
+                idle=p.get_idle_size(),
+                used=p.get_size(),
+                host=self._parse_host(p),
+            ) for p in self.pools
+        ]
 
 
 __all__ = ("PoolManager",)

@@ -8,6 +8,7 @@ from typing import (
     Any, AsyncContextManager, DefaultDict, Dict, List, Optional, Set, Union,
 )
 
+from .metrics import Metrics
 from .utils import Dsn, Stopwatch, split_dsn
 
 
@@ -220,6 +221,10 @@ class BasePoolManager(ABC):
 
     @abstractmethod
     def is_connection_closed(self, connection):
+        pass
+
+    @abstractmethod
+    def metrics(self) -> Metrics:
         pass
 
     def acquire(

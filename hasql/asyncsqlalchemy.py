@@ -1,4 +1,5 @@
 import asyncio
+from typing import Iterable, Sequence
 
 import sqlalchemy as sa  # type: ignore
 from sqlalchemy.ext.asyncio import (  # type: ignore
@@ -7,10 +8,13 @@ from sqlalchemy.ext.asyncio import (  # type: ignore
 from sqlalchemy.pool import QueuePool  # type: ignore
 
 from hasql.base import BasePoolManager
+from hasql.metrics import Metrics
 from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
+    pools: Iterable[AsyncEngine]
+
     def get_pool_freesize(self, pool: AsyncEngine):
         queue_pool: QueuePool = pool.sync_engine.pool
         return queue_pool.size() - queue_pool.checkedout()
@@ -49,6 +53,17 @@ class PoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection: AsyncConnection):
         return connection.closed
+
+    def metrics(self) -> Sequence[Metrics]:
+        return [
+            Metrics(
+                max=p.sync_engine.pool.size(),
+                min=0,
+                idle=p.sync_engine.pool.checkedin(),
+                used=p.sync_engine.pool.checkedout(),
+                host=p.sync_engine.url.host,
+            ) for p in self.pools
+        ]
 
 
 __all__ = ("PoolManager",)

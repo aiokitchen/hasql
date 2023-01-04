@@ -1,5 +1,5 @@
 import asyncio
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import sqlalchemy as sa  # type: ignore
 from sqlalchemy.ext.asyncio import AsyncConnection  # type: ignore

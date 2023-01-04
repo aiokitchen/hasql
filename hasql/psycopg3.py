@@ -1,4 +1,4 @@
-from typing import Iterable, Optional, Sequence
+from typing import Optional, Sequence
 
 from psycopg import AsyncConnection, errors
 from psycopg.conninfo import conninfo_to_dict

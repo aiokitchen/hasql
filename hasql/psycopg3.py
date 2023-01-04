@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Iterable
+from typing import Iterable, Optional, Sequence
 
 from psycopg import AsyncConnection, errors
 from psycopg.conninfo import conninfo_to_dict
@@ -39,7 +39,7 @@ class PoolAcquireContext:
 
 
 class PoolManager(BasePoolManager):
-    pools: Iterable[AsyncConnectionPool]
+    pools: Sequence[AsyncConnectionPool]
 
     def __init__(self, dsn: str, **kwargs):
         pool_factory_kwargs = kwargs.pop("pool_factory_kwargs", {})
@@ -98,11 +98,11 @@ class PoolManager(BasePoolManager):
         ]
         return [
             Metrics(
-                min=stat.get("pool_min"),
-                max=stat.get("pool_max"),
-                idle=stat.get("pool_available"),
-                used=stat.get("pool_size"),
-                host=stat.get("host"),
+                min=stat["pool_min"],
+                max=stat["pool_max"],
+                idle=stat["pool_available"],
+                used=stat["pool_size"],
+                host=stat["host"],
             ) for stat in stats
         ]
 

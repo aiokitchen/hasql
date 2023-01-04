@@ -1,5 +1,5 @@
 import asyncio
-from typing import Sequence, Iterable
+from typing import Iterable, Sequence
 
 import asyncpg  # type: ignore
 
@@ -9,7 +9,7 @@ from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
-    pools: Iterable[asyncpg.Pool]
+    pools: Sequence[asyncpg.Pool]
 
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()

@@ -5,12 +5,19 @@ from collections import defaultdict
 from itertools import chain
 from types import MappingProxyType
 from typing import (
-    Any, AsyncContextManager, DefaultDict, Dict, List, Optional, Set, Union,
+    Any,
+    AsyncContextManager,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Union,
 )
 
 from .metrics import Metrics
 from .utils import Dsn, Stopwatch, split_dsn
-
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +195,7 @@ class BasePoolManager(ABC):
         return self._closed
 
     @property
-    def pools(self) -> tuple:
+    def pools(self) -> Sequence[Any]:
         return tuple(self._pools)
 
     @abstractmethod
@@ -224,7 +231,7 @@ class BasePoolManager(ABC):
         pass
 
     @abstractmethod
-    def metrics(self) -> Metrics:
+    def metrics(self) -> Sequence[Metrics]:
         pass
 
     def acquire(

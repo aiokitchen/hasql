@@ -2,9 +2,8 @@ import asyncio
 from typing import Iterable, Sequence
 
 import sqlalchemy as sa  # type: ignore
-from sqlalchemy.ext.asyncio import (  # type: ignore
-    AsyncConnection, AsyncEngine, create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncConnection  # type: ignore
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import QueuePool  # type: ignore
 
 from hasql.base import BasePoolManager
@@ -13,8 +12,6 @@ from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
-    pools: Iterable[AsyncEngine]
-
     def get_pool_freesize(self, pool: AsyncEngine):
         queue_pool: QueuePool = pool.sync_engine.pool
         return queue_pool.size() - queue_pool.checkedout()

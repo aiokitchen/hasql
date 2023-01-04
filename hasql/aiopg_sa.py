@@ -1,4 +1,4 @@
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import aiopg.sa
 from psycopg2._psycopg import parse_dsn
@@ -9,13 +9,13 @@ from hasql.utils import Dsn
 
 
 class PoolManager(AioPgPoolManager):
-    pools: Iterable[aiopg.sa.Engine]
+    pools: Sequence[aiopg.sa.Engine]  # type: ignore[assignment]
 
     async def _is_master(self, connection):
         read_only = await connection.scalar("SHOW transaction_read_only")
         return read_only == "off"
 
-    async def _pool_factory(self, dsn: Dsn):
+    async def _pool_factory(self, dsn: Dsn) -> aiopg.sa.Engine:
         return await aiopg.sa.create_engine(
             str(dsn),
             **self.pool_factory_kwargs,

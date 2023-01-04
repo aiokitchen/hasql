@@ -1,5 +1,5 @@
 import asyncio
-from typing import Sequence, Iterable
+from typing import Iterable, Sequence
 
 import aiopg
 
@@ -9,7 +9,7 @@ from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
-    pools: Iterable[aiopg.Pool]
+    pools: Sequence[aiopg.Pool]
 
     def get_pool_freesize(self, pool):
         return pool.freesize
@@ -49,11 +49,11 @@ class PoolManager(BasePoolManager):
     def metrics(self) -> Sequence[Metrics]:
         return [
             Metrics(
-                max=p.maxsize,
+                max=p.maxsize or 0,
                 min=p.minsize,
                 idle=p.freesize,
                 used=p.size - p.freesize,
-                host=Dsn.parse(p).netloc,
+                host=Dsn.parse(str(p)).netloc,
             ) for p in self.pools
         ]
 

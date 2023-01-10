@@ -1,8 +1,10 @@
 import asyncio
+from typing import Sequence
 
 import mock
 
 from hasql.base import BasePoolManager
+from hasql.metrics import Metrics
 from hasql.utils import Dsn
 
 
@@ -124,6 +126,9 @@ class TestPoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection: TestConnection):
         return connection.is_closed
+
+    def metrics(self) -> Sequence[Metrics]:
+        return []
 
 
 __all__ = ("TestPoolManager",)

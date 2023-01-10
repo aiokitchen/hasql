@@ -1,10 +1,12 @@
 import asyncio
 from contextlib import AsyncExitStack
 
+import mock
 import pytest
 from psycopg import AsyncConnection
 from psycopg_pool import TooManyRequests
 
+from hasql.metrics import Metrics
 from hasql.psycopg3 import PoolManager
 
 
@@ -103,3 +105,10 @@ async def test_acquire_with_timeout_context2(pool_manager, pool_size):
 
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(pool_manager.acquire_master())
+
+
+async def test_metrics(pool_manager):
+    async with pool_manager.acquire_master():
+        assert pool_manager.metrics() == [
+            Metrics(max=11, min=11, idle=9, used=11, host=mock.ANY)
+        ]

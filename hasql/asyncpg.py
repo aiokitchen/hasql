@@ -43,17 +43,16 @@ class PoolManager(BasePoolManager):
         return connection.is_closed()
 
     def _parse_host(self, pool: asyncpg.Pool):
-        if len(pool._connect_args) != 1:
-            return ""
-        return Dsn.parse(pool._connect_args[0]).netloc
+        addr, _ = pool._working_addr
+        return addr
 
     def metrics(self) -> Sequence[Metrics]:
         return [
             Metrics(
-                max=p.get_max_size(),
-                min=p.get_min_size(),
-                idle=p.get_idle_size(),
-                used=p.get_size(),
+                max=p._maxsize,
+                min=p._minsize,
+                idle=self.get_pool_freesize(p),
+                used=p._maxsize - self.get_pool_freesize(p),
                 host=self._parse_host(p),
             ) for p in self.pools
         ]

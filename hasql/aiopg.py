@@ -53,7 +53,7 @@ class PoolManager(BasePoolManager):
                 min=p.minsize,
                 idle=p.freesize,
                 used=p.size - p.freesize,
-                host=Dsn.parse(str(p)).netloc,
+                host=Dsn.parse(str(p._dsn)).netloc,
             ) for p in self.pools
         ]
 

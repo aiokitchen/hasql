@@ -22,8 +22,8 @@ class GreedyBalancerPolicy(BaseBalancerPolicy):
         if (
                 not read_only or
                 (
-                        choose_master_as_replica and
-                        self._pool_manager.master_pool_count > 0
+                    choose_master_as_replica and
+                    self._pool_manager.master_pool_count > 0
                 )
         ):
             candidates.extend(await self._pool_manager.get_master_pools())

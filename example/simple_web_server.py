@@ -1,5 +1,5 @@
 import argparse
-import asyncio
+from dataclasses import asdict
 
 import aiohttp.web
 from aiohttp.web_urldispatcher import View
@@ -45,6 +45,12 @@ class ReplicaHandler(BaseView):
         return aiohttp.web.Response(text=str(res))
 
 
+class MetricsHandler(BaseView):
+    async def get(self):
+        metrics = self.pool.metrics()
+        return aiohttp.web.json_response([asdict(m) for m in metrics])
+
+
 class REST(AIOHTTPService):
     async def create_application(self) -> aiohttp.web.Application:
         app = aiohttp.web.Application()
@@ -52,8 +58,8 @@ class REST(AIOHTTPService):
         app.add_routes([
             aiohttp.web.get('/master', MasterHandler),
             aiohttp.web.get('/replica', ReplicaHandler),
+            aiohttp.web.get('/metrics', MetricsHandler),
         ])
-
         pool_manager: PoolManager = PoolManager(
             arguments.dsn,
             pool_factory_kwargs=dict(
@@ -73,5 +79,5 @@ if __name__ == '__main__':
     arguments = parser.parse_args()
     service = REST(address=arguments.address, port=arguments.port)
 
-    with entrypoint(service) as loop:
+    with entrypoint(service, log_config=True) as loop:
         loop.run_forever()

@@ -1,7 +1,7 @@
 from typing import Sequence
 
 import aiopg.sa
-from psycopg2._psycopg import parse_dsn  # noqa
+from psycopg2.extensions import parse_dsn
 
 from hasql.aiopg import PoolManager as AioPgPoolManager
 from hasql.metrics import Metrics

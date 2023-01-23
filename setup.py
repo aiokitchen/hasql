@@ -79,6 +79,7 @@ setup(
             "tox~=3.24",
             "twine",
             "wheel",
+            "types-psycopg2",
         ],
     },
     project_urls={

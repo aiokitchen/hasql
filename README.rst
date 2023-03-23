@@ -143,6 +143,9 @@ For ``asyncpg``
         return pool
 
 For ``sqlalchemy``
+~~~~~~~~~~~~~~~~~~
+
+**sqlalchemy>=1.4** & **asyncpg** must be installed as requirements
 
 .. code-block:: python
 

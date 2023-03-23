@@ -145,7 +145,7 @@ For ``asyncpg``
 For ``sqlalchemy``
 ~~~~~~~~~~~~~~~~~~
 
-**sqlalchemy>=1.4** & **asyncpg** must be installed as requirements
+**sqlalchemy[asyncio] & asyncpg** must be installed as requirements
 
 .. code-block:: python
 

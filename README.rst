@@ -20,7 +20,7 @@ Features
 * autodetection of hosts role changes, in case replica
   host will be promoted to master
 * different policies for load balancing
-* support for ``asyncpg``, ``psycopg3`` and ``aiopg``
+* support for ``asyncpg``, ``psycopg3``, ``aiopg``, ``sqlalchemy`` and ``asyncpgsa``
 
 
 Usage

@@ -36,6 +36,7 @@ setup(
         "Programming Language :: Python",
     ],
     packages=find_packages(exclude=["tests", "example"]),
+    package_data={'hasql': ['py.typed']},
     install_requires=[],
     extras_require={
         "aiopg": [

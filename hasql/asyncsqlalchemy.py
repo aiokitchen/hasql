@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import QueuePool  # type: ignore
 
 from hasql.base import BasePoolManager
-from hasql.metrics import Metrics
+from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
@@ -51,9 +51,12 @@ class PoolManager(BasePoolManager):
     def is_connection_closed(self, connection: AsyncConnection):
         return connection.closed
 
-    def metrics(self) -> Sequence[Metrics]:
+    def host(self, pool: AsyncEngine):
+        return pool.sync_engine.url.host
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
         return [
-            Metrics(
+            DriverMetrics(
                 max=p.sync_engine.pool.size(),
                 min=0,
                 idle=p.sync_engine.pool.checkedin(),

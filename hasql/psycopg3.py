@@ -5,7 +5,7 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool
 
 from .base import BasePoolManager
-from .metrics import Metrics
+from .metrics import DriverMetrics
 from .utils import Dsn
 
 
@@ -89,15 +89,18 @@ class PoolManager(BasePoolManager):
     def is_connection_closed(self, connection):
         return connection.closed
 
-    def metrics(self) -> Sequence[Metrics]:
+    def host(self, pool: AsyncConnectionPool):
+        return conninfo_to_dict(pool.conninfo)["host"]
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
         stats = [
             {
                 **p.get_stats(),
-                "host": conninfo_to_dict(p.conninfo)["host"]
+                "host": self.host(p)
             } for p in self.pools
         ]
         return [
-            Metrics(
+            DriverMetrics(
                 min=stat["pool_min"],
                 max=stat["pool_max"],
                 idle=stat["pool_available"],

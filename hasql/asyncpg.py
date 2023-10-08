@@ -4,7 +4,7 @@ from typing import Sequence
 import asyncpg  # type: ignore
 
 from hasql.base import BasePoolManager
-from hasql.metrics import Metrics
+from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
@@ -42,18 +42,18 @@ class PoolManager(BasePoolManager):
     def is_connection_closed(self, connection):
         return connection.is_closed()
 
-    def _parse_host(self, pool: asyncpg.Pool):
+    def host(self, pool: asyncpg.Pool):
         addr, _ = pool._working_addr
         return addr
 
-    def metrics(self) -> Sequence[Metrics]:
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
         return [
-            Metrics(
+            DriverMetrics(
                 max=p._maxsize,
                 min=p._minsize,
                 idle=self.get_pool_freesize(p),
                 used=p._maxsize - self.get_pool_freesize(p),
-                host=self._parse_host(p),
+                host=self.host(p),
             ) for p in self.pools
         ]
 

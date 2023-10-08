@@ -4,7 +4,7 @@ from typing import Sequence
 import aiopg
 
 from hasql.base import BasePoolManager
-from hasql.metrics import Metrics
+from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
@@ -46,15 +46,20 @@ class PoolManager(BasePoolManager):
     def is_connection_closed(self, connection):
         return connection.closed
 
-    def metrics(self) -> Sequence[Metrics]:
+    def host(self, pool: aiopg.Pool):
+        return Dsn.parse(str(pool._dsn)).netloc
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
         return [
-            Metrics(
+            DriverMetrics(
                 max=p.maxsize or 0,
                 min=p.minsize,
                 idle=p.freesize,
                 used=p.size - p.freesize,
                 host=Dsn.parse(str(p._dsn)).netloc,
-            ) for p in self.pools
+            )
+            for p in self.pools
+            if p
         ]
 
 

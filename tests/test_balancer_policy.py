@@ -9,7 +9,6 @@ from hasql.balancer_policy import (
 )
 from tests.mocks import TestPoolManager
 
-
 balancer_policies = pytest.mark.parametrize(
     "balancer_policy",
     [

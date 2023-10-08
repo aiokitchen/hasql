@@ -120,7 +120,7 @@ class Dsn:
             "dbname": dbname if dbname is not None else self._dbname,
             **self._kwargs,
         }
-        return self.__class__(**params)     # type: ignore
+        return self.__class__(**params)
 
     def __str__(self) -> str:
         return self._compiled_dsn

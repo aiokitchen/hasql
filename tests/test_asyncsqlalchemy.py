@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from hasql.asyncsqlalchemy import PoolManager
-from hasql.metrics import Metrics
+from hasql.metrics import DriverMetrics
 
 
 @pytest.fixture
@@ -70,6 +70,6 @@ async def test_is_connection_closed(pool_manager):
 
 async def test_metrics(pool_manager):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics() == [
-            Metrics(max=11, min=0, idle=0, used=2, host=mock.ANY)
+        assert pool_manager.metrics().drivers == [
+            DriverMetrics(max=11, min=0, idle=0, used=2, host=mock.ANY)
         ]

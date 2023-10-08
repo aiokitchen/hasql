@@ -4,7 +4,7 @@ import aiopg.sa
 from psycopg2.extensions import parse_dsn
 
 from hasql.aiopg import PoolManager as AioPgPoolManager
-from hasql.metrics import Metrics
+from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
@@ -21,9 +21,12 @@ class PoolManager(AioPgPoolManager):
             **self.pool_factory_kwargs,
         )
 
-    def metrics(self) -> Sequence[Metrics]:
+    def host(self, pool: aiopg.sa.Engine):
+        return parse_dsn(pool.dsn).get("host", ""),
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
         return [
-            Metrics(
+            DriverMetrics(
                 max=p.maxsize,
                 min=p.minsize,
                 idle=p.freesize,

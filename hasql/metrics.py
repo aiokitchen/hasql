@@ -1,7 +1,7 @@
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Dict, Sequence
 
 
 @dataclass(frozen=True)
@@ -19,8 +19,8 @@ class HasqlMetrics:
     pool_time: float
     acquire: int
     acquire_time: float
-    add_connections: dict[str, int]
-    remove_connections: dict[str, int]
+    add_connections: Dict[str, int]
+    remove_connections: Dict[str, int]
 
 
 @dataclass
@@ -29,8 +29,8 @@ class CalculateMetrics:
     _pool_time: int = 0
     _acquire: int = 0
     _acquire_time: int = 0
-    _add_connections: dict[str, int] = field(default_factory=dict)
-    _remove_connections: dict[str, int] = field(default_factory=dict)
+    _add_connections: Dict[str, int] = field(default_factory=dict)
+    _remove_connections: Dict[str, int] = field(default_factory=dict)
 
     def metrics(self) -> HasqlMetrics:
         return HasqlMetrics(

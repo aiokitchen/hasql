@@ -20,7 +20,7 @@ Features
 * autodetection of hosts role changes, in case replica
   host will be promoted to master
 * different policies for load balancing
-* support for ``asyncpg``, ``psycopg3`` and ``aiopg``
+* support for ``asyncpg``, ``psycopg3``, ``aiopg``, ``sqlalchemy`` and ``asyncpgsa``
 
 
 Usage
@@ -94,7 +94,7 @@ Code example using ``aiopg``:
         pool = PoolManager(multihost_dsn)
 
         # Waiting for 1 master and 1 replica will be available
-        await pool_manager.ready(masters_count=1, replicas_count=1)
+        await pool.ready(masters_count=1, replicas_count=1)
         return pool
 
 Code example using ``aiopg.sa``:
@@ -115,7 +115,7 @@ Code example using ``aiopg.sa``:
         pool = PoolManager(multihost_dsn)
 
         # Waiting for 1 master and 1 replica will be available
-        await pool_manager.ready(masters_count=1, replicas_count=1)
+        await pool.ready(masters_count=1, replicas_count=1)
         return pool
 
 For ``asyncpg``
@@ -139,8 +139,45 @@ For ``asyncpg``
         pool = PoolManager(multihost_dsn)
 
         # Waiting for 1 master and 1 replica will be available
-        await pool_manager.ready(masters_count=1, replicas_count=1)
+        await pool.ready(masters_count=1, replicas_count=1)
         return pool
+
+For ``sqlalchemy``
+~~~~~~~~~~~~~~~~~~
+
+**sqlalchemy[asyncio] & asyncpg** must be installed as requirements
+
+.. code-block:: python
+
+    from hasql.asyncsqlalchemy import PoolManager
+
+    hosts = ",".join([
+        "master-host:5432",
+        "replica-host-1:5432",
+        "replica-host-2:5432",
+    ])
+
+    multihost_dsn = f"postgresql://user:password@{hosts}/dbname"
+
+
+    async def create_pool(dsn) -> PoolManager:
+        pool = PoolManager(
+            multihost_dsn,
+
+            # Use master for acquire_replica, if no replicas available
+            fallback_master=True,
+
+            # You can pass pool-specific options
+            pool_factory_kwargs=dict(
+                pool_size=10,
+                max_overflow=5
+            )
+        )
+
+        # Waiting for 1 master and 1 replica will be available
+        await pool.ready(masters_count=1, replicas_count=1)
+        return pool
+
 
 For ``asyncpgsa``
 ~~~~~~~~~~~~~~~~~
@@ -164,8 +201,8 @@ For ``asyncpgsa``
 
         # Waiting for 1 master and 1 replica will be available
         await asyncio.gather(
-            pool_manager.wait_masters_ready(1),
-            pool_manager.wait_replicas_ready(1)
+            pool.wait_masters_ready(1),
+            pool.wait_replicas_ready(1)
         )
         return pool
 
@@ -191,7 +228,7 @@ For ``psycopg3``
         pool = PoolManager(multihost_dsn)
 
         # Waiting for 1 master and 1 replica will be available
-        await pool_manager.ready(masters_count=1, replicas_count=1)
+        await pool.ready(masters_count=1, replicas_count=1)
         return pool
 
 

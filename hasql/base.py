@@ -542,6 +542,7 @@ class BasePoolManager(ABC):
                     dsn.with_(password="******"),
                     exc_info=True,
                 )
+                await asyncio.sleep(self._refresh_delay)
 
     async def _periodic_pool_check(self, pool, dsn: Dsn, sys_connection):
         while not self._closing:

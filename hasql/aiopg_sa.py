@@ -21,8 +21,8 @@ class PoolManager(AioPgPoolManager):
             **self.pool_factory_kwargs,
         )
 
-    def host(self, pool: aiopg.sa.Engine):
-        return parse_dsn(pool.dsn).get("host", ""),
+    def host(self, pool: aiopg.sa.Engine) -> str:  # type: ignore[override]
+        return parse_dsn(pool.dsn).get("host", "")
 
     def _driver_metrics(self) -> Sequence[DriverMetrics]:
         return [

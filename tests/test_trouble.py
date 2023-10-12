@@ -26,7 +26,7 @@ from tests.conftest import (
 async def test_unavailable_db(pool_manager_factory, localhost, db_server_port):
     async with timeout(1):
         pg_dsn = f"postgres://pg:pg@{localhost}:{db_server_port}/pg"
-        async with pool_manager_factory(pg_dsn) as pool_manager:
+        async with pool_manager_factory(pg_dsn):
             pass
 
 

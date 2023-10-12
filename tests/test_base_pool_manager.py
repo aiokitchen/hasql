@@ -199,7 +199,9 @@ async def test_close(pool_manager: BasePoolManager):
     assert pool_manager.replica_pool_count == 0
     for pool in pool_manager:
         assert pool is not None
-        assert all(pool_manager.is_connection_closed(conn) for conn in pool.connections)
+        assert all(
+            pool_manager.is_connection_closed(conn) for conn in pool.connections
+        )
         assert all(conn.close.call_count == 1 for conn in pool.connections)
 
 
@@ -212,7 +214,9 @@ async def test_terminate(pool_manager: BasePoolManager):
     assert pool_manager.replica_pool_count == 0
     for pool in pool_manager:
         assert pool is not None
-        assert all(pool_manager.is_connection_closed(conn) for conn in pool.connections)
+        assert all(
+            pool_manager.is_connection_closed(conn) for conn in pool.connections
+        )
         assert all(conn.terminate.call_count == 1 for conn in pool.connections)
 
 

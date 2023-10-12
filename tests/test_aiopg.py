@@ -3,7 +3,7 @@ import pytest
 from aiopg import Connection
 
 from hasql.aiopg import PoolManager
-from hasql.metrics import DriverMetrics, HasqlMetrics
+from hasql.metrics import DriverMetrics
 
 
 @pytest.fixture

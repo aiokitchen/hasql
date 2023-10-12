@@ -2,7 +2,13 @@ import pytest
 from mock import mock
 
 from hasql.metrics import HasqlMetrics
-from tests.conftest import setup_aiopg, setup_aiopgsa, setup_asyncpg, setup_asyncsqlalchemy, setup_psycopg3
+from tests.conftest import (
+    setup_aiopg,
+    setup_aiopgsa,
+    setup_asyncpg,
+    setup_asyncsqlalchemy,
+    setup_psycopg3,
+)
 
 
 @pytest.mark.parametrize(
@@ -13,7 +19,7 @@ from tests.conftest import setup_aiopg, setup_aiopgsa, setup_asyncpg, setup_asyn
         (setup_asyncpg),
         (setup_asyncsqlalchemy),
         (setup_psycopg3),
-    ]
+    ],
 )
 async def test_hasql_context_metrics(pool_manager_factory, pg_dsn):
     async with pool_manager_factory(pg_dsn) as pool_manager:
@@ -51,7 +57,7 @@ async def test_hasql_context_metrics(pool_manager_factory, pg_dsn):
         (setup_asyncpg),
         (setup_asyncsqlalchemy),
         (setup_psycopg3),
-    ]
+    ],
 )
 async def test_hasql_metrics(pool_manager_factory, pg_dsn):
     async with pool_manager_factory(pg_dsn) as pool_manager:
@@ -91,7 +97,7 @@ async def test_hasql_metrics(pool_manager_factory, pg_dsn):
         (setup_asyncpg),
         (setup_asyncsqlalchemy),
         (setup_psycopg3),
-    ]
+    ],
 )
 async def test_hasql_close_metrics(pool_manager_factory, pg_dsn):
     async with pool_manager_factory(pg_dsn) as pool_manager:

@@ -4,7 +4,13 @@ from unittest import mock
 import pytest
 from async_timeout import timeout
 
-from tests.conftest import setup_aiopg, setup_aiopgsa, setup_asyncpg, setup_asyncsqlalchemy, setup_psycopg3
+from tests.conftest import (
+    setup_aiopg,
+    setup_aiopgsa,
+    setup_asyncpg,
+    setup_asyncsqlalchemy,
+    setup_psycopg3,
+)
 
 
 @pytest.mark.parametrize(
@@ -15,7 +21,7 @@ from tests.conftest import setup_aiopg, setup_aiopgsa, setup_asyncpg, setup_asyn
         (setup_asyncpg),
         (setup_asyncsqlalchemy),
         (setup_psycopg3),
-    ]
+    ],
 )
 async def test_unavailable_db(pool_manager_factory, localhost, db_server_port):
     async with timeout(1):
@@ -32,7 +38,7 @@ async def test_unavailable_db(pool_manager_factory, localhost, db_server_port):
         (setup_asyncpg, "asyncpg"),
         (setup_asyncsqlalchemy, "asyncsqlalchemy"),
         (setup_psycopg3, "psycopg3"),
-    ]
+    ],
 )
 async def test_catch_cancelled_error(pool_manager_factory, pg_dsn, name):
     async with pool_manager_factory(pg_dsn) as pool_manager:

@@ -5,11 +5,19 @@ from collections import defaultdict
 from itertools import chain
 from types import MappingProxyType
 from typing import (
-    Any, AsyncContextManager, DefaultDict, Dict, List, Optional, Set, Union,
+    Any,
+    AsyncContextManager,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Union,
 )
 
+from .metrics import CalculateMetrics, DriverMetrics, Metrics
 from .utils import Dsn, Stopwatch, split_dsn
-
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +45,14 @@ class AbstractBalancerPolicy(ABC):
 class PoolAcquireContext(AsyncContextManager):
 
     def __init__(
-            self,
-            pool_manager: "BasePoolManager",
-            read_only: bool,
-            fallback_master: Optional[bool],
-            master_as_replica_weight: Optional[float],
-            timeout: float,
-            **kwargs,
+        self,
+        pool_manager: "BasePoolManager",
+        read_only: bool,
+        fallback_master: Optional[bool],
+        master_as_replica_weight: Optional[float],
+        timeout: float,
+        metrics: CalculateMetrics,
+        **kwargs,
     ):
         self.pool_manager = pool_manager
         self.read_only = read_only
@@ -53,37 +62,50 @@ class PoolAcquireContext(AsyncContextManager):
         self.kwargs = kwargs
         self.pool = None
         self.context = None
+        self.metrics = metrics
 
     async def acquire_from_pool_connection(self):
         async def execute():
-            self.pool = await self.pool_manager.balancer.get_pool(
-                read_only=self.read_only,
-                fallback_master=self.fallback_master,
-                master_as_replica_weight=self.master_as_replica_weight,
-            )
-            connection = await self.pool_manager.acquire_from_pool(
-                self.pool, **self.kwargs,
-            )
-            self.pool_manager.register_connection(connection, self.pool)
-            return connection
-        return await asyncio.wait_for(execute(), timeout=self.timeout)
+            with self.metrics.with_get_pool():
+                self.pool = await self.pool_manager.balancer.get_pool(
+                    read_only=self.read_only,
+                    fallback_master=self.fallback_master,
+                    master_as_replica_weight=self.master_as_replica_weight,
+                )
+
+            with self.metrics.with_acquire():
+                return await self.pool_manager.acquire_from_pool(
+                    self.pool, **self.kwargs,
+                )
+
+        self.conn = await asyncio.wait_for(execute(), timeout=self.timeout)
+        self.metrics.add_connection(self.pool_manager.host(self.pool))
+        self.pool_manager.register_connection(self.conn, self.pool)
+        return self.conn
 
     async def __aenter__(self):
         async def go():
-            self.pool = await self.pool_manager.balancer.get_pool(
-                read_only=self.read_only,
-                fallback_master=self.fallback_master,
-                master_as_replica_weight=self.master_as_replica_weight,
-            )
-            self.context = self.pool_manager.acquire_from_pool(
-                self.pool,
-                **self.kwargs,
-            )
+            with self.metrics.with_get_pool():
+                self.pool = await self.pool_manager.balancer.get_pool(
+                    read_only=self.read_only,
+                    fallback_master=self.fallback_master,
+                    master_as_replica_weight=self.master_as_replica_weight,
+                )
+            with self.metrics.with_acquire():
+                self.context = self.pool_manager.acquire_from_pool(
+                    self.pool,
+                    **self.kwargs,
+                )
             return await self.context.__aenter__()
-        return await asyncio.wait_for(go(), timeout=self.timeout)
+
+        self.conn = await asyncio.wait_for(go(), timeout=self.timeout)
+        self.metrics.add_connection(self.pool_manager.host(self.pool))
+        return self.conn
 
     async def __aexit__(self, *exc):
+        self.metrics.remove_connection(self.pool_manager.host(self.pool))
         await self.context.__aexit__(*exc)
+        del self.conn
 
     def __await__(self):
         return self.acquire_from_pool_connection().__await__()
@@ -145,6 +167,7 @@ class BasePoolManager(ABC):
         ]
         self._closing = False
         self._closed = False
+        self._metrics = CalculateMetrics()
 
     @property
     def dsn(self) -> List[Dsn]:
@@ -187,7 +210,7 @@ class BasePoolManager(ABC):
         return self._closed
 
     @property
-    def pools(self) -> tuple:
+    def pools(self) -> Sequence[Any]:
         return tuple(self._pools)
 
     @abstractmethod
@@ -221,6 +244,20 @@ class BasePoolManager(ABC):
     @abstractmethod
     def is_connection_closed(self, connection):
         pass
+
+    @abstractmethod
+    def host(self, pool: Any):
+        pass
+
+    @abstractmethod
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
+        pass
+
+    def metrics(self) -> Metrics:
+        return Metrics(
+            drivers=self._driver_metrics(),
+            hasql=self._metrics.metrics(),
+        )
 
     def acquire(
         self,
@@ -260,6 +297,7 @@ class BasePoolManager(ABC):
             fallback_master=fallback_master,
             master_as_replica_weight=master_as_replica_weight,
             timeout=timeout,
+            metrics=self._metrics,
             **kwargs,
         )
 
@@ -291,7 +329,9 @@ class BasePoolManager(ABC):
                 "Pool.release() received invalid connection: "
                 f"{connection!r} is not a member of this pool",
             )
+
         pool = self._unmanaged_connections.pop(connection)
+        self._metrics.remove_connection(self.host(pool))
         await self.release_to_pool(connection, pool, **kwargs)
 
     async def close(self):
@@ -331,8 +371,8 @@ class BasePoolManager(ABC):
     ):
 
         if (
-                (masters_count is not None and replicas_count is None) or
-                (masters_count is None and replicas_count is not None)
+            (masters_count is not None and replicas_count is None) or
+            (masters_count is None and replicas_count is not None)
         ):
             raise ValueError(
                 "Arguments master_count and replicas_count "

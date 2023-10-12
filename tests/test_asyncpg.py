@@ -1,7 +1,9 @@
+import mock
 import pytest
 from asyncpg import Connection
 
 from hasql.asyncpg import PoolManager
+from hasql.metrics import DriverMetrics
 
 
 @pytest.fixture
@@ -49,3 +51,10 @@ async def test_release(pool_manager):
     assert pool_manager.get_pool_freesize(asyncpg_pool) == 9
     await pool_manager.release(conn)
     assert pool_manager.get_pool_freesize(asyncpg_pool) == 10
+
+
+async def test_metrics(pool_manager):
+    async with pool_manager.acquire_master():
+        assert pool_manager.metrics().drivers == [
+            DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
+        ]

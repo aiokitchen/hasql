@@ -1,9 +1,11 @@
-from typing import Optional
+from typing import Optional, Sequence
 
 from psycopg import AsyncConnection, errors
+from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool
 
 from .base import BasePoolManager
+from .metrics import DriverMetrics
 from .utils import Dsn
 
 
@@ -37,6 +39,8 @@ class PoolAcquireContext:
 
 
 class PoolManager(BasePoolManager):
+    pools: Sequence[AsyncConnectionPool]
+
     def __init__(self, dsn: str, **kwargs):
         pool_factory_kwargs = kwargs.pop("pool_factory_kwargs", {})
         pool_factory_kwargs["max_waiting"] = -1
@@ -84,6 +88,26 @@ class PoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection):
         return connection.closed
+
+    def host(self, pool: AsyncConnectionPool):
+        return conninfo_to_dict(pool.conninfo)["host"]
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
+        stats = [
+            {
+                **p.get_stats(),
+                "host": self.host(p)
+            } for p in self.pools
+        ]
+        return [
+            DriverMetrics(
+                min=stat["pool_min"],
+                max=stat["pool_max"],
+                idle=stat["pool_available"],
+                used=stat["pool_size"],
+                host=stat["host"],
+            ) for stat in stats
+        ]
 
 
 __all__ = ("PoolManager",)

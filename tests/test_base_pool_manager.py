@@ -64,8 +64,12 @@ async def test_ready_min_count_hosts(pool_manager: BasePoolManager):
 
 
 @pytest.mark.parametrize(
-    ["masters_count", "replicas_count"], [
-        [-1, 5], [2, -10], [1, None], [None, 2],
+    ["masters_count", "replicas_count"],
+    [
+        [-1, 5],
+        [2, -10],
+        [1, None],
+        [None, 2],
     ],
 )
 async def test_ready_with_invalid_arguments(

@@ -1,5 +1,4 @@
 import asyncpgsa  # type: ignore
-
 from hasql.asyncpg import PoolManager as AsyncPgPoolManager
 from hasql.utils import Dsn
 

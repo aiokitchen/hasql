@@ -9,6 +9,7 @@ package_info = (
 authors = (
     ("Vladislav Bakaev", "vlad@bakaev.tech"),
     ("Dmitry Orlov", "me@mosquito.su"),
+    ("Pavel Mosein", "me@pavkazzz.ru"),
 )
 
 authors_email = ", ".join(email for _, email in authors)

@@ -1,7 +1,9 @@
+import mock
 import pytest
 from aiopg import Connection
 
 from hasql.aiopg import PoolManager
+from hasql.metrics import DriverMetrics
 
 
 @pytest.fixture
@@ -53,3 +55,17 @@ async def test_is_connection_closed(pool_manager):
         assert not pool_manager.is_connection_closed(conn)
         await conn.close()
         assert pool_manager.is_connection_closed(conn)
+
+
+async def test_driver_context_metrics(pool_manager, pg_dsn):
+    async with pool_manager.acquire_master():
+        assert pool_manager.metrics().drivers == [
+            DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
+        ]
+
+
+async def test_driver_metrics(pool_manager, pg_dsn):
+    _ = await pool_manager.acquire_master()
+    assert pool_manager.metrics().drivers == [
+        DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
+    ]

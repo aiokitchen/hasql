@@ -8,19 +8,35 @@ from hasql.utils import Dsn, host_is_ipv6_address, split_dsn
 
 FORMAT_DSN_TEST_CASES = [
     [
-        "localhost", 5432, None, None, None,
+        "localhost",
+        5432,
+        None,
+        None,
+        None,
         "postgresql://localhost:5432",
     ],
     [
-        "localhost", 5432, "user", None, None,
+        "localhost",
+        5432,
+        "user",
+        None,
+        None,
         "postgresql://user@localhost:5432",
     ],
     [
-        "localhost", 5432, "user", "pwd", None,
+        "localhost",
+        5432,
+        "user",
+        "pwd",
+        None,
         "postgresql://user:pwd@localhost:5432",
     ],
     [
-        "localhost", 5432, None, None, "testdb",
+        "localhost",
+        5432,
+        None,
+        None,
+        "testdb",
         "postgresql://localhost:5432/testdb",
     ],
     [
@@ -55,7 +71,10 @@ def test_format_dsn(
     expected_result: str,
 ):
     result_dsn = Dsn(
-        netloc=f"{host}:{port}", user=user, password=password, dbname=dbname,
+        netloc=f"{host}:{port}",
+        user=user,
+        password=password,
+        dbname=dbname,
     )
     assert str(result_dsn) == expected_result
 
@@ -101,9 +120,7 @@ def make_examples():
         for (hosts, expected) in hosts_cases:
             yield [
                 build_url(host=hosts, **case),
-                [
-                    build_url(host=host, **case) for host in expected
-                ],
+                [build_url(host=host, **case) for host in expected],
             ]
 
 
@@ -112,7 +129,8 @@ MULTI_DSN_PORT_CASES = list(make_examples())
 
 @pytest.mark.parametrize(
     ["dsn", "expected_dsns"],
-    MULTI_DSN_PORT_CASES, ids=[dsn for dsn, _ in MULTI_DSN_PORT_CASES],
+    MULTI_DSN_PORT_CASES,
+    ids=[dsn for dsn, _ in MULTI_DSN_PORT_CASES],
 )
 def test_multi_dsn_port(dsn: str, expected_dsns: Iterable[str]):
     for host_dsn, expected in zip(split_dsn(Dsn.parse(dsn)), expected_dsns):
@@ -121,8 +139,10 @@ def test_multi_dsn_port(dsn: str, expected_dsns: Iterable[str]):
 
 def test_replace_dsn_params():
     dsn = Dsn(
-        netloc="localhost:5432", user="user",
-        password="password", dbname="testdb",
+        netloc="localhost:5432",
+        user="user",
+        password="password",
+        dbname="testdb",
     )
     replaced_dsn = dsn.with_(password="***")
     assert str(replaced_dsn) == "postgresql://user:***@localhost:5432/testdb"
@@ -170,7 +190,8 @@ def test_split_dsn_with_default_port():
 
 
 @pytest.mark.parametrize(
-    ["hosts_count"], [[1024]],
+    ["hosts_count"],
+    [[1024]],
 )
 def test_split_large_dsn(hosts_count: int):
     hosts = [f"host-{i}" for i in range(hosts_count)]

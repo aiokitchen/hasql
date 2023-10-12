@@ -1,8 +1,10 @@
 import asyncio
+from typing import Any, Sequence
 
 import mock
 
 from hasql.base import BasePoolManager
+from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
@@ -124,6 +126,15 @@ class TestPoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection: TestConnection):
         return connection.is_closed
+
+    def metrics(self) -> Sequence[DriverMetrics]:
+        return []
+
+    def host(self, pool: Any):
+        return "test-host:5432"
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
+        return []
 
 
 __all__ = ("TestPoolManager",)

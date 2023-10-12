@@ -1,12 +1,16 @@
 import asyncio
+from typing import Sequence
 
 import aiopg
 
 from hasql.base import BasePoolManager
+from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
+    pools: Sequence[aiopg.Pool]
+
     def get_pool_freesize(self, pool):
         return pool.freesize
 
@@ -18,12 +22,10 @@ class PoolManager(BasePoolManager):
 
     async def _is_master(self, connection):
         cursor = await connection.cursor()
-        try:
+        async with cursor:
             await cursor.execute("SHOW transaction_read_only")
             read_only = await cursor.fetchone()
             return read_only[0] == "off"
-        finally:
-            cursor.close()
 
     async def _pool_factory(self, dsn: Dsn):
         return await aiopg.create_pool(str(dsn), **self.pool_factory_kwargs)
@@ -43,6 +45,22 @@ class PoolManager(BasePoolManager):
 
     def is_connection_closed(self, connection):
         return connection.closed
+
+    def host(self, pool: aiopg.Pool):
+        return Dsn.parse(str(pool._dsn)).netloc
+
+    def _driver_metrics(self) -> Sequence[DriverMetrics]:
+        return [
+            DriverMetrics(
+                max=p.maxsize or 0,
+                min=p.minsize,
+                idle=p.freesize,
+                used=p.size - p.freesize,
+                host=Dsn.parse(str(p._dsn)).netloc,
+            )
+            for p in self.pools
+            if p
+        ]
 
 
 __all__ = ("PoolManager",)

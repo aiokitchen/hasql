@@ -58,7 +58,7 @@ setup(
             "async_timeout",
             "psycopg[pool]>=3.0,<4",
             "aiopg[sa]~=1.4.0",
-            "asyncpg~=0.27.0",
+            "asyncpg~=0.29.0",
             "pytest~=6.2.5",
             "pytest-cov~=3.0.0",
             "aiomisc~=15.2.4",

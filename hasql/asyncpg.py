@@ -1,7 +1,8 @@
 import asyncio
-from typing import Sequence
+from typing import ClassVar, Dict, Sequence
 
 import asyncpg  # type: ignore
+from packaging.version import parse as parse_version
 
 from hasql.base import BasePoolManager
 from hasql.metrics import DriverMetrics
@@ -10,6 +11,7 @@ from hasql.utils import Dsn
 
 class PoolManager(BasePoolManager):
     pools: Sequence[asyncpg.Pool]
+    cached_hosts: ClassVar[Dict[int, str]] = {}
 
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()
@@ -42,9 +44,23 @@ class PoolManager(BasePoolManager):
     def is_connection_closed(self, connection):
         return connection.is_closed()
 
-    def host(self, pool: asyncpg.Pool):
-        addr, _ = pool._working_addr
-        return addr
+    if parse_version(asyncpg.__version__) >= parse_version("0.29.0"):
+        # We try to reproduce the same behaviour of the _working_addr
+        # attribute prior the 0.29.0 version for getting the host
+        # linked to a pool.
+        def host(self, pool: asyncpg.Pool):
+            conn = next(
+                (holder._con for holder in pool._holders if holder._con),
+                None
+            )
+            if conn is not None:
+                addr, _ = conn._addr
+                PoolManager.cached_hosts[id(pool)] = addr
+            return PoolManager.cached_hosts[id(pool)]
+    else:
+        def host(self, pool: asyncpg.Pool):
+            addr, _ = pool._working_addr
+            return addr
 
     def _driver_metrics(self) -> Sequence[DriverMetrics]:
         return [

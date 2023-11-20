@@ -32,7 +32,9 @@ class PoolManager(AioPgPoolManager):
                 idle=p.freesize,
                 used=p.size - p.freesize,
                 host=parse_dsn(p.dsn).get("host", ""),
-            ) for p in self.pools
+            )
+            for p in self.pools
+            if p
         ]
 
 

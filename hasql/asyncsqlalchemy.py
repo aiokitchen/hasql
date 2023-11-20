@@ -62,7 +62,9 @@ class PoolManager(BasePoolManager):
                 idle=p.sync_engine.pool.checkedin(),
                 used=p.sync_engine.pool.checkedout(),
                 host=p.sync_engine.url.host,
-            ) for p in self.pools
+            )
+            for p in self.pools
+            if p
         ]
 
 

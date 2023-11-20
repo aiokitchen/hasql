@@ -97,7 +97,9 @@ class PoolManager(BasePoolManager):
             {
                 **p.get_stats(),
                 "host": self.host(p)
-            } for p in self.pools
+            }
+            for p in self.pools
+            if p
         ]
         return [
             DriverMetrics(

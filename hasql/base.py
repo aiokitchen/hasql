@@ -73,7 +73,7 @@ class PoolAcquireContext(AsyncContextManager):
                     master_as_replica_weight=self.master_as_replica_weight,
                 )
 
-            with self.metrics.with_acquire():
+            with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
                 return await self.pool_manager.acquire_from_pool(
                     self.pool, **self.kwargs,
                 )
@@ -91,7 +91,7 @@ class PoolAcquireContext(AsyncContextManager):
                     fallback_master=self.fallback_master,
                     master_as_replica_weight=self.master_as_replica_weight,
                 )
-            with self.metrics.with_acquire():
+            with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
                 self.context = self.pool_manager.acquire_from_pool(
                     self.pool,
                     **self.kwargs,

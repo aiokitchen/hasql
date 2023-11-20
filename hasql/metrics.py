@@ -1,4 +1,5 @@
 import time
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Dict, Sequence
@@ -17,8 +18,8 @@ class DriverMetrics:
 class HasqlMetrics:
     pool: int
     pool_time: float
-    acquire: int
-    acquire_time: float
+    acquire: Dict[str, int]
+    acquire_time: Dict[str, float]
     add_connections: Dict[str, int]
     remove_connections: Dict[str, int]
 
@@ -26,9 +27,11 @@ class HasqlMetrics:
 @dataclass
 class CalculateMetrics:
     _pool: int = 0
-    _pool_time: int = 0
-    _acquire: int = 0
-    _acquire_time: int = 0
+    _pool_time: float = 0.
+    _acquire: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    _acquire_time: Dict[str, float] = field(
+        default_factory=lambda: defaultdict(int)
+    )
     _add_connections: Dict[str, int] = field(default_factory=dict)
     _remove_connections: Dict[str, int] = field(default_factory=dict)
 
@@ -37,7 +40,7 @@ class CalculateMetrics:
             pool=self._pool,
             pool_time=self._pool_time,
             acquire=self._acquire,
-            acquire_time=self._acquire,
+            acquire_time=self._acquire_time,
             add_connections=self._add_connections,
             remove_connections=self._remove_connections,
         )
@@ -50,11 +53,11 @@ class CalculateMetrics:
         self._pool_time += time.monotonic() - tt
 
     @contextmanager
-    def with_acquire(self):
-        self._acquire += 1
+    def with_acquire(self, pool: str):
+        self._acquire[pool] += 1
         tt = time.monotonic()
         yield
-        self._acquire_time += time.monotonic() - tt
+        self._acquire_time[pool] += time.monotonic() - tt
 
     def add_connection(self, dsn: str):
         self._add_connections[dsn] = (

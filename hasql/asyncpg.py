@@ -70,7 +70,9 @@ class PoolManager(BasePoolManager):
                 idle=self.get_pool_freesize(p),
                 used=p._maxsize - self.get_pool_freesize(p),
                 host=self.host(p),
-            ) for p in self.pools
+            )
+            for p in self.pools
+            if p
         ]
 
 

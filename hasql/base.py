@@ -4,17 +4,8 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from itertools import chain
 from types import MappingProxyType
-from typing import (
-    Any,
-    AsyncContextManager,
-    DefaultDict,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Union,
-)
+from typing import (Any, AsyncContextManager, DefaultDict, Dict, List,
+                    Optional, Sequence, Set, Union)
 
 from .metrics import CalculateMetrics, DriverMetrics, Metrics
 from .utils import Dsn, Stopwatch, split_dsn
@@ -517,7 +508,7 @@ class BasePoolManager(ABC):
                 if sys_connection is not None:
                     try:
                         await self.release_to_pool(sys_connection, pool)
-                    except Exception:
+                    except (Exception, asyncio.CancelledError):
                         logger.warning(
                             "Release connection to pool with "
                             "exception for dsn=%r",

@@ -1,5 +1,8 @@
 import asyncio
+from asyncio import CancelledError
+from contextlib import ExitStack
 from typing import Optional
+from unittest.mock import patch, AsyncMock
 
 import pytest
 from async_timeout import timeout as timeout_context
@@ -244,3 +247,26 @@ async def test_replica_behind_firewall(pool_manager: BasePoolManager):
         replica_pool.behind_firewall(False)
         await pool_manager.wait_next_pool_check()
         assert pool_manager.replica_pool_count == replica_pool_count
+
+
+async def test_check_pool_canceled_error_while_releasing_connection(
+    pool_manager: BasePoolManager
+):
+    await pool_manager.ready()
+    master_pool = await pool_manager.balancer.get_pool(read_only=False)
+
+    with ExitStack() as stack:
+        for conn in master_pool.connections:
+            stack.enter_context(
+                patch.object(
+                    conn, 'is_master', AsyncMock(side_effect=Exception)
+                )
+            )
+        stack.enter_context(
+            patch.object(
+                master_pool, 'release', AsyncMock(side_effect=CancelledError)
+            )
+        )
+        await asyncio.sleep(1)
+        for task in pool_manager._refresh_role_tasks:
+            assert not task.done()

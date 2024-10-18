@@ -524,6 +524,15 @@ class BasePoolManager(ABC):
                             censored_dsn,
                             exc_info=True,
                         )
+                    except asyncio.CancelledError as cancelled_error:
+                        if self._closing:
+                            raise cancelled_error from None
+                        logger.warning(
+                            "Release connection to pool with "
+                            "Cancelled error for dsn=%r",
+                            censored_dsn,
+                            exc_info=True,
+                        )
                     sys_connection = None
                 await self._notify_about_pool_has_checked(dsn)
 

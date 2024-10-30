@@ -28,9 +28,11 @@ class PoolManager(BasePoolManager):
         await connection.close()
 
     async def _is_master(self, connection: AsyncConnection):
-        return await connection.scalar(
+        result = await connection.scalar(
             sa.text("SHOW transaction_read_only"),
         ) == "off"
+        await connection.execute(sa.text('COMMIT'))
+        return result
 
     async def _pool_factory(self, dsn: Dsn):
         # TODO: Add support of psycopg3 after release of sqlalchemy 2.0

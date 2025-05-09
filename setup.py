@@ -81,6 +81,7 @@ setup(
             "sqlalchemy[asyncio]~=1.4.27",
             "black~=21.9b0",
             "tox~=3.24",
+            "ruff~=0.11.9",
             "twine",
             "wheel",
             "types-psycopg2",

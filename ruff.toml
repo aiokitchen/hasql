@@ -1,0 +1,10 @@
+line-length = 80
+target-version = "py39"
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "C90",  # mccabe
+    "F",    # pyflakes
+]

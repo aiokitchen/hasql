@@ -10,6 +10,7 @@ jobs:
   lint:
 
     runs-on: ubuntu-latest
+    container: snakepacker/python:all
 
     strategy:
       matrix:
@@ -19,17 +20,16 @@ jobs:
           - mypy
 
     steps:
-      - uses: actions/checkout@v2
-      - name: tox ${{ matrix.linter }}
-        uses: docker://snakepacker/python:all
+      - uses: actions/checkout@v4
+      - name: Run tox ${{ matrix.linter }}
+        run: tox
         env:
           TOXENV: ${{ matrix.linter }}
-        with:
-          args: tox
 
   build:
     needs: lint
     runs-on: ubuntu-latest
+    container: snakepacker/python:all
 
     services:
       postgres:
@@ -52,14 +52,11 @@ jobs:
           - py312
 
     steps:
-      - uses: actions/checkout@v2
-
-      - name: tox ${{ matrix.toxenv }}
-        uses: docker://snakepacker/python:all
+      - uses: actions/checkout@v4
+      - name: Run tox ${{ matrix.toxenv }}
+        run: tox
         env:
           FORCE_COLOR: 1
           TOXENV: ${{ matrix.toxenv }}
           PG_DSN: postgres://test:test@postgres:5432/test
           COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
-        with:
-          args: /bin/bash -c "wait-for-port postgres:5432 && tox"

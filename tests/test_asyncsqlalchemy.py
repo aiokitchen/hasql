@@ -1,9 +1,11 @@
+from typing import Optional
+
 import mock
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
-from hasql.asyncsqlalchemy import PoolManager
+from hasql.asyncsqlalchemy import PoolManager, async_sessionmaker
 from hasql.metrics import DriverMetrics
 
 
@@ -73,3 +75,45 @@ async def test_metrics(pool_manager):
         assert pool_manager.metrics().drivers == [
             DriverMetrics(max=11, min=0, idle=0, used=2, host=mock.ANY)
         ]
+
+
+@pytest.mark.parametrize("expire_on_commit", [True, False, None])
+@pytest.mark.parametrize("autoflush", [True, False, None])
+@pytest.mark.parametrize("read_only", [True, False, None])
+async def test_async_sessionmaker(
+    pool_manager: PoolManager,
+    expire_on_commit: Optional[bool],
+    autoflush: Optional[bool],
+    read_only: Optional[bool],
+):
+    acquire_kwargs = {}
+
+    if read_only is not None:
+        acquire_kwargs["read_only"] = read_only
+
+    kwargs = {}
+
+    if expire_on_commit is not None:
+        kwargs["expire_on_commit"] = expire_on_commit
+
+    if autoflush is not None:
+        kwargs["autoflush"] = autoflush
+
+    if acquire_kwargs:
+        kwargs["acquire_kwargs"] = acquire_kwargs
+
+    session_factory = async_sessionmaker(
+        pool_manager=pool_manager,
+        class_=AsyncSession,
+        **kwargs,
+    )
+
+    async with session_factory() as session:
+        result = await session.execute(sa.text("SELECT 1"))
+        assert result.scalar() == 1
+
+        if expire_on_commit is not None:
+            assert session.expire_on_commit == expire_on_commit
+
+        if autoflush is not None:
+            assert session.autoflush == autoflush

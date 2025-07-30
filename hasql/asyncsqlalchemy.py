@@ -1,8 +1,9 @@
 import asyncio
-from typing import Sequence
+from contextlib import _AsyncGeneratorContextManager, asynccontextmanager
+from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence, Type
 
 import sqlalchemy as sa  # type: ignore
-from sqlalchemy.ext.asyncio import AsyncConnection  # type: ignore
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession  # type: ignore
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import QueuePool  # type: ignore
 
@@ -70,4 +71,55 @@ class PoolManager(BasePoolManager):
         ]
 
 
-__all__ = ("PoolManager",)
+def async_sessionmaker(
+    pool_manager: PoolManager,
+    *,
+    class_: Type[AsyncSession] = AsyncSession,
+    autoflush: bool = True,
+    expire_on_commit: bool = True,
+    info: Optional[Dict[Any, Any]] = None,
+    acquire_kwargs: Optional[Dict[str, Any]] = None,
+    **kw: Any,
+) -> Callable[..., _AsyncGeneratorContextManager]:
+    """Create async session maker with hasql pool support.
+
+    This function replaces the default `async_sessionmaker` from
+    SQLAlchemy to work with the `PoolManager` class. It allows you to
+    create an async session that is bound to a connection acquired from
+    the pool. The session will automatically release the connection
+    back to the pool when the session is closed.
+
+    You also can specify the session class to use with the `class_`
+    parameter, and you can customize the session's behavior with
+    parameters like `autoflush`, `expire_on_commit`, and `info`.
+
+    Use the `acquire_kwargs` to pass additional parameters to the
+    `pool.acquire()` method. E.g. to create a session with replica
+    connection:
+    >>> ReplicaSession = async_sessionmaker(
+    >>>     pool_manager,
+    >>>     acquire_kwargs={"read_only": True}
+    >>> )
+
+    """
+    if acquire_kwargs is None:
+        acquire_kwargs = {}
+
+    @asynccontextmanager
+    async def create_async_session() -> AsyncIterator[AsyncSession]:
+        """Create an async session with connection from the pool."""
+        # TODO(PY310): Use parentheses to break the statement in multiple lines
+        async with pool_manager.acquire(**acquire_kwargs) as connection, \
+        class_(
+            bind=connection,
+            autoflush=autoflush,
+            expire_on_commit=expire_on_commit,
+            info=info,
+            **kw,
+        ) as session:
+            yield session
+
+    return create_async_session
+
+
+__all__ = ("PoolManager", "async_sessionmaker")

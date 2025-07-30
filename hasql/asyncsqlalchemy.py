@@ -2,10 +2,10 @@ import asyncio
 from contextlib import _AsyncGeneratorContextManager, asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence, Type
 
-import sqlalchemy as sa  # type: ignore
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession  # type: ignore
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import QueuePool  # type: ignore
+from sqlalchemy.pool import QueuePool
 
 from hasql.base import BasePoolManager
 from hasql.metrics import DriverMetrics
@@ -14,7 +14,7 @@ from hasql.utils import Dsn
 
 class PoolManager(BasePoolManager):
     def get_pool_freesize(self, pool: AsyncEngine):
-        queue_pool: QueuePool = pool.sync_engine.pool
+        queue_pool: QueuePool = pool.sync_engine.pool  # type: ignore[assignment]
         return queue_pool.size() - queue_pool.checkedout()
 
     def acquire_from_pool(self, pool: AsyncEngine, **kwargs):

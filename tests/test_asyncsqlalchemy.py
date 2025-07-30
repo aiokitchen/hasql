@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Type
 
 import mock
 import pytest
@@ -19,7 +19,6 @@ async def pool_manager(pg_dsn):
     try:
         await pg_pool.ready()
         yield pg_pool
-        pass
     finally:
         await pg_pool.close()
 
@@ -80,11 +79,13 @@ async def test_metrics(pool_manager):
 @pytest.mark.parametrize("expire_on_commit", [True, False, None])
 @pytest.mark.parametrize("autoflush", [True, False, None])
 @pytest.mark.parametrize("read_only", [True, False, None])
+@pytest.mark.parametrize("class_", [AsyncSession, None])
 async def test_async_sessionmaker(
     pool_manager: PoolManager,
     expire_on_commit: Optional[bool],
     autoflush: Optional[bool],
     read_only: Optional[bool],
+    class_: Optional[Type[AsyncSession]],
 ):
     acquire_kwargs = {}
 
@@ -99,21 +100,23 @@ async def test_async_sessionmaker(
     if autoflush is not None:
         kwargs["autoflush"] = autoflush
 
+    if class_ is not None:
+        kwargs["class_"] = class_
+
     if acquire_kwargs:
         kwargs["acquire_kwargs"] = acquire_kwargs
 
-    session_factory = async_sessionmaker(
-        pool_manager=pool_manager,
-        class_=AsyncSession,
-        **kwargs,
-    )
+    session_factory = async_sessionmaker(pool_manager=pool_manager, **kwargs)
 
-    async with session_factory() as session:
+    async with session_factory() as session:  # type: AsyncSession
         result = await session.execute(sa.text("SELECT 1"))
         assert result.scalar() == 1
 
         if expire_on_commit is not None:
-            assert session.expire_on_commit == expire_on_commit
+            assert session.sync_session.expire_on_commit == expire_on_commit
 
         if autoflush is not None:
-            assert session.autoflush == autoflush
+            assert session.sync_session.autoflush == autoflush
+
+        if class_ is not None:
+            assert isinstance(session, class_)

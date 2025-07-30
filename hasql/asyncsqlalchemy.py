@@ -108,15 +108,16 @@ def async_sessionmaker(
     @asynccontextmanager
     async def create_async_session() -> AsyncIterator[AsyncSession]:
         """Create an async session with connection from the pool."""
-        # TODO(PY310): Use parentheses to break the statement in multiple lines
-        async with pool_manager.acquire(**acquire_kwargs) as connection, \
-        class_(
-            bind=connection,
-            autoflush=autoflush,
-            expire_on_commit=expire_on_commit,
-            info=info,
-            **kw,
-        ) as session:
+        async with (
+            pool_manager.acquire(**acquire_kwargs) as connection,
+            class_(
+                bind=connection,
+                autoflush=autoflush,
+                expire_on_commit=expire_on_commit,
+                info=info,
+                **kw,
+            ) as session,
+        ):
             yield session
 
     return create_async_session

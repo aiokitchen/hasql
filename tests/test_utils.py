@@ -283,7 +283,9 @@ def test_parse_connection_string_single_port_multiple_hosts():
 
 def test_parse_connection_string_with_password():
     """Test connection string with password."""
-    conn_str = "host=localhost port=5432 dbname=mydb user=testuser password=secret"
+    conn_str = (
+        "host=localhost port=5432 dbname=mydb user=testuser password=secret"
+    )
     dsn = Dsn.parse(conn_str)
     assert dsn.user == "testuser"
     assert dsn.password == "secret"
@@ -291,7 +293,10 @@ def test_parse_connection_string_with_password():
 
 def test_parse_connection_string_with_extra_params():
     """Test connection string with additional parameters."""
-    conn_str = "host=localhost port=5432 dbname=mydb connect_timeout=10 sslmode=require"
+    conn_str = (
+        "host=localhost port=5432 dbname=mydb "
+        "connect_timeout=10 sslmode=require"
+    )
     dsn = Dsn.parse(conn_str)
     assert dsn.params["connect_timeout"] == "10"
     assert dsn.params["sslmode"] == "require"
@@ -316,7 +321,9 @@ def test_split_dsn_from_connection_string():
 
 def test_connection_string_example_format():
     """Test the exact example format from the user request."""
-    conn_str = "host=localhost,localhost port=5432,5432 dbname=mydb connect_timeout=10"
+    conn_str = (
+        "host=localhost,localhost port=5432,5432 dbname=mydb connect_timeout=10"
+    )
     dsn = Dsn.parse(conn_str)
     assert dsn.netloc == "localhost:5432,localhost:5432"
     assert dsn.dbname == "mydb"

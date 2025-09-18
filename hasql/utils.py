@@ -79,13 +79,13 @@ class Dsn:
                 **params
             )
 
-        # Try connection string format: 'host=localhost,localhost port=5432,5432 dbname=mydb'
+        # Try connection string format:
+        # 'host=localhost,localhost port=5432,5432 dbname=mydb'
         return cls._parse_connection_string(dsn)
 
     @classmethod
-    def _parse_connection_string(cls, conn_str: str) -> "Dsn":
-        """Parse libpq-style connection string format."""
-        # Parse key=value pairs
+    def _parse_connection_string_params(cls, conn_str: str) -> Dict[str, str]:
+        """Parse key=value pairs from connection string."""
         params = {}
         current_key = None
         current_value = ""
@@ -124,14 +124,11 @@ class Dsn:
         if current_key is not None:
             params[current_key] = current_value.strip()
 
-        # Extract standard connection parameters
-        hosts = params.pop('host', 'localhost')
-        ports = params.pop('port', '5432')
-        user = params.pop('user', None)
-        password = params.pop('password', None)
-        dbname = params.pop('dbname', None)
+        return params
 
-        # Handle comma-separated hosts and ports
+    @classmethod
+    def _build_netloc(cls, hosts: str, ports: str) -> str:
+        """Build netloc from comma-separated hosts and ports."""
         host_list = [h.strip() for h in hosts.split(',')]
         port_list = [p.strip() for p in ports.split(',')]
 
@@ -144,9 +141,25 @@ class Dsn:
 
         # Build netloc (use first host:port for the main DSN)
         if len(host_list) > 0 and len(port_list) > 0:
-            netloc = ','.join(f"{host}:{port}" for host, port in zip(host_list, port_list))
+            return ','.join(
+                f"{host}:{port}" for host, port in zip(host_list, port_list)
+            )
         else:
-            netloc = 'localhost:5432'
+            return 'localhost:5432'
+
+    @classmethod
+    def _parse_connection_string(cls, conn_str: str) -> "Dsn":
+        """Parse libpq-style connection string format."""
+        params = cls._parse_connection_string_params(conn_str)
+
+        # Extract standard connection parameters
+        hosts = params.pop('host', 'localhost')
+        ports = params.pop('port', '5432')
+        user = params.pop('user', None)
+        password = params.pop('password', None)
+        dbname = params.pop('dbname', None)
+
+        netloc = cls._build_netloc(hosts, ports)
 
         return cls(
             scheme="postgresql",

@@ -35,8 +35,9 @@ class PoolManager(BasePoolManager):
         return result
 
     async def _pool_factory(self, dsn: Dsn):
-        # TODO: Add support of psycopg3 after release of sqlalchemy 2.0
-        d = str(dsn).replace("postgresql", "postgresql+asyncpg")
+        d = str(dsn)
+        if d.startswith('postgresql://'):
+            d = d.replace('postgresql://', 'postgresql+asyncpg://', 1)
         return create_async_engine(d, **self.pool_factory_kwargs)
 
     def _prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:

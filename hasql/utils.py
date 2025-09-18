@@ -50,28 +50,106 @@ class Dsn:
 
     @classmethod
     def parse(cls, dsn: str) -> "Dsn":
+        # First try URL format
         match = cls.URL_EXP.match(dsn)
 
-        if match is None:
-            raise ValueError("Bad DSN")
+        if match is not None:
+            # URL format parsing
+            groupdict = match.groupdict()
+            scheme = groupdict["scheme"]
+            user = groupdict.get("user")
+            password = groupdict.get("password")
+            netloc: str = groupdict["netloc"]
+            dbname = (groupdict.get("path") or "").lstrip("/")
+            query = groupdict.get("query") or ""
 
-        groupdict = match.groupdict()
-        scheme = groupdict["scheme"]
-        user = groupdict.get("user")
-        password = groupdict.get("password")
-        netloc: str = groupdict["netloc"]
-        dbname = (groupdict.get("path") or "").lstrip("/")
-        query = groupdict.get("query") or ""
+            params = {}
+            for item in query.split("&"):
+                if not item:
+                    continue
+                key, value = item.split("=", 1)
+                params[key] = unquote(value)
 
+            return cls(
+                scheme=scheme,
+                netloc=netloc,
+                user=user,
+                password=password,
+                dbname=dbname,
+                **params
+            )
+
+        # Try connection string format: 'host=localhost,localhost port=5432,5432 dbname=mydb'
+        return cls._parse_connection_string(dsn)
+
+    @classmethod
+    def _parse_connection_string(cls, conn_str: str) -> "Dsn":
+        """Parse libpq-style connection string format."""
+        # Parse key=value pairs
         params = {}
-        for item in query.split("&"):
-            if not item:
-                continue
-            key, value = item.split("=", 1)
-            params[key] = unquote(value)
+        current_key = None
+        current_value = ""
+        in_quotes = False
+        quote_char = None
+
+        i = 0
+        while i < len(conn_str):
+            char = conn_str[i]
+
+            if not in_quotes:
+                if char in ("'", '"'):
+                    in_quotes = True
+                    quote_char = char
+                elif char == '=' and current_key is None:
+                    # Found key=value separator
+                    current_key = current_value.strip()
+                    current_value = ""
+                elif char.isspace() and current_key is not None:
+                    # End of value
+                    params[current_key] = current_value.strip()
+                    current_key = None
+                    current_value = ""
+                else:
+                    current_value += char
+            else:
+                if char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+                else:
+                    current_value += char
+
+            i += 1
+
+        # Handle final key=value pair
+        if current_key is not None:
+            params[current_key] = current_value.strip()
+
+        # Extract standard connection parameters
+        hosts = params.pop('host', 'localhost')
+        ports = params.pop('port', '5432')
+        user = params.pop('user', None)
+        password = params.pop('password', None)
+        dbname = params.pop('dbname', None)
+
+        # Handle comma-separated hosts and ports
+        host_list = [h.strip() for h in hosts.split(',')]
+        port_list = [p.strip() for p in ports.split(',')]
+
+        # If single port, use it for all hosts
+        if len(port_list) == 1 and len(host_list) > 1:
+            port_list = port_list * len(host_list)
+        # If single host, use it for all ports
+        elif len(host_list) == 1 and len(port_list) > 1:
+            host_list = host_list * len(port_list)
+
+        # Build netloc (use first host:port for the main DSN)
+        if len(host_list) > 0 and len(port_list) > 0:
+            netloc = ','.join(f"{host}:{port}" for host, port in zip(host_list, port_list))
+        else:
+            netloc = 'localhost:5432'
 
         return cls(
-            scheme=scheme,
+            scheme="postgresql",
             netloc=netloc,
             user=user,
             password=password,

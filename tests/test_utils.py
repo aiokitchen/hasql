@@ -253,3 +253,76 @@ def test_ipv6_host_in_dsn():
     )
     result_dsn, *_ = split_dsn(dsn)
     assert str(result_dsn) == dsn
+
+
+# Connection string format tests
+def test_parse_connection_string_basic():
+    """Test basic connection string parsing."""
+    conn_str = "host=localhost port=5432 dbname=mydb user=testuser"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.netloc == "localhost:5432"
+    assert dsn.user == "testuser"
+    assert dsn.dbname == "mydb"
+    assert dsn.scheme == "postgresql"
+
+
+def test_parse_connection_string_multiple_hosts():
+    """Test connection string with comma-separated hosts."""
+    conn_str = "host=localhost,replica port=5432,5433 dbname=mydb"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.netloc == "localhost:5432,replica:5433"
+    assert dsn.dbname == "mydb"
+
+
+def test_parse_connection_string_single_port_multiple_hosts():
+    """Test connection string with single port for multiple hosts."""
+    conn_str = "host=localhost,replica port=5432 dbname=mydb"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.netloc == "localhost:5432,replica:5432"
+
+
+def test_parse_connection_string_with_password():
+    """Test connection string with password."""
+    conn_str = "host=localhost port=5432 dbname=mydb user=testuser password=secret"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.user == "testuser"
+    assert dsn.password == "secret"
+
+
+def test_parse_connection_string_with_extra_params():
+    """Test connection string with additional parameters."""
+    conn_str = "host=localhost port=5432 dbname=mydb connect_timeout=10 sslmode=require"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.params["connect_timeout"] == "10"
+    assert dsn.params["sslmode"] == "require"
+
+
+def test_parse_connection_string_quoted_values():
+    """Test connection string with quoted values."""
+    conn_str = "host=localhost port=5432 dbname='my database' user='test user'"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.dbname == "my database"
+    assert dsn.user == "test user"
+
+
+def test_split_dsn_from_connection_string():
+    """Test that split_dsn works with connection string format."""
+    conn_str = "host=localhost,replica port=5432,5433 dbname=mydb user=testuser"
+    dsns = split_dsn(conn_str)
+    assert len(dsns) == 2
+    assert str(dsns[0]) == "postgresql://testuser@localhost:5432/mydb"
+    assert str(dsns[1]) == "postgresql://testuser@replica:5433/mydb"
+
+
+def test_connection_string_example_format():
+    """Test the exact example format from the user request."""
+    conn_str = "host=localhost,localhost port=5432,5432 dbname=mydb connect_timeout=10"
+    dsn = Dsn.parse(conn_str)
+    assert dsn.netloc == "localhost:5432,localhost:5432"
+    assert dsn.dbname == "mydb"
+    assert dsn.params["connect_timeout"] == "10"
+
+    # Test that split_dsn handles duplicates correctly
+    dsns = split_dsn(conn_str)
+    assert len(dsns) == 1  # Should deduplicate identical host:port pairs
+    assert str(dsns[0]) == "postgresql://localhost:5432/mydb?connect_timeout=10"

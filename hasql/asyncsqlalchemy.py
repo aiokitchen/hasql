@@ -14,7 +14,7 @@ from hasql.utils import Dsn
 
 class PoolManager(BasePoolManager):
     def get_pool_freesize(self, pool: AsyncEngine):
-        queue_pool: QueuePool = pool.sync_engine.pool  # type: ignore
+        queue_pool: QueuePool = pool.sync_engine.pool
         return queue_pool.size() - queue_pool.checkedout()
 
     def acquire_from_pool(self, pool: AsyncEngine, **kwargs):

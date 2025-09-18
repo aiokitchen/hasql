@@ -1,10 +1,11 @@
 import asyncio
-from typing import Sequence
+from contextlib import _AsyncGeneratorContextManager, asynccontextmanager
+from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence, Type
 
-import sqlalchemy as sa  # type: ignore
-from sqlalchemy.ext.asyncio import AsyncConnection  # type: ignore
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import QueuePool  # type: ignore
+from sqlalchemy.pool import QueuePool
 
 from hasql.base import BasePoolManager
 from hasql.metrics import DriverMetrics
@@ -13,7 +14,7 @@ from hasql.utils import Dsn
 
 class PoolManager(BasePoolManager):
     def get_pool_freesize(self, pool: AsyncEngine):
-        queue_pool: QueuePool = pool.sync_engine.pool
+        queue_pool: QueuePool = pool.sync_engine.pool  # type: ignore
         return queue_pool.size() - queue_pool.checkedout()
 
     def acquire_from_pool(self, pool: AsyncEngine, **kwargs):
@@ -35,8 +36,9 @@ class PoolManager(BasePoolManager):
         return result
 
     async def _pool_factory(self, dsn: Dsn):
-        # TODO: Add support of psycopg3 after release of sqlalchemy 2.0
-        d = str(dsn).replace("postgresql", "postgresql+asyncpg")
+        d = str(dsn)
+        if d.startswith('postgresql://'):
+            d = d.replace('postgresql://', 'postgresql+asyncpg://', 1)
         return create_async_engine(d, **self.pool_factory_kwargs)
 
     def _prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
@@ -70,4 +72,56 @@ class PoolManager(BasePoolManager):
         ]
 
 
-__all__ = ("PoolManager",)
+def async_sessionmaker(
+    pool_manager: PoolManager,
+    *,
+    class_: Type[AsyncSession] = AsyncSession,
+    autoflush: bool = True,
+    expire_on_commit: bool = True,
+    info: Optional[Dict[Any, Any]] = None,
+    acquire_kwargs: Optional[Dict[str, Any]] = None,
+    **kw: Any,
+) -> Callable[..., _AsyncGeneratorContextManager]:
+    """Create async session maker with hasql pool support.
+
+    This function replaces the default `async_sessionmaker` from
+    SQLAlchemy to work with the `PoolManager` class. It allows you to
+    create an async session that is bound to a connection acquired from
+    the pool. The session will automatically release the connection
+    back to the pool when the session is closed.
+
+    You also can specify the session class to use with the `class_`
+    parameter, and you can customize the session's behavior with
+    parameters like `autoflush`, `expire_on_commit`, and `info`.
+
+    Use the `acquire_kwargs` to pass additional parameters to the
+    `pool.acquire()` method. E.g. to create a session with replica
+    connection:
+    >>> ReplicaSession = async_sessionmaker(
+    >>>     pool_manager,
+    >>>     acquire_kwargs={"read_only": True}
+    >>> )
+
+    """
+    if acquire_kwargs is None:
+        acquire_kwargs = {}
+
+    @asynccontextmanager
+    async def create_async_session() -> AsyncIterator[AsyncSession]:
+        """Create an async session with connection from the pool."""
+        async with (
+            pool_manager.acquire(**acquire_kwargs) as connection,
+            class_(
+                bind=connection,
+                autoflush=autoflush,
+                expire_on_commit=expire_on_commit,
+                info=info,
+                **kw,
+            ) as session,
+        ):
+            yield session
+
+    return create_async_session
+
+
+__all__ = ("PoolManager", "async_sessionmaker")

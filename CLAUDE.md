@@ -19,7 +19,6 @@ pytest -vv tests/test_utils.py::test_parse_connection_string_basic
 pytest -vv tests/test_utils.py -k "connection_string"
 
 # Run tests using tox (preferred)
-tox -e py39  # Python 3.9
 tox -e py310 # Python 3.10
 tox -e py311 # Python 3.11
 ```

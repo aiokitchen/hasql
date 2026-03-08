@@ -90,7 +90,10 @@ class PoolManager(BasePoolManager):
         return connection.closed
 
     def host(self, pool: AsyncConnectionPool):
-        return conninfo_to_dict(pool.conninfo)["host"]
+        conninfo = pool.conninfo
+        if not isinstance(conninfo, str):
+            return "unknown"
+        return conninfo_to_dict(conninfo)["host"]
 
     def _driver_metrics(self) -> Sequence[DriverMetrics]:
         stats = [

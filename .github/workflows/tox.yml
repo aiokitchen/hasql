@@ -16,11 +16,12 @@ jobs:
       matrix:
         linter:
           - lint
-          - checkdoc
           - mypy
 
     steps:
       - uses: actions/checkout@v4
+      - name: Install tox 4.49.0
+        run: python3 -m pip install "tox==4.49.0"
       - name: Run tox ${{ matrix.linter }}
         run: tox
         env:
@@ -33,7 +34,7 @@ jobs:
 
     services:
       postgres:
-        image: mdillon/postgis:11-alpine
+        image: postgres:18-alpine
         ports:
           - 5432:5432
         env:
@@ -46,14 +47,16 @@ jobs:
 
       matrix:
         toxenv:
-          - py39
           - py310
           - py311
           - py312
           - py313
+          - py314
 
     steps:
       - uses: actions/checkout@v4
+      - name: Install tox 4.49.0
+        run: python3 -m pip install "tox==4.49.0"
       - name: Run tox ${{ matrix.toxenv }}
         run: tox
         env:

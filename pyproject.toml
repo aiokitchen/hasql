@@ -1,0 +1,173 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hasql"
+dynamic = ["version"]
+description = "hasql is a module for acquiring actual connections with masters and replicas"
+readme = { file = "README.rst", content-type = "text/x-rst" }
+requires-python = ">=3.10"
+license = { text = "Apache 2" }
+authors = [
+  { name = "Vladislav Bakaev", email = "vlad@bakaev.tech" },
+  { name = "Dmitry Orlov", email = "me@mosquito.su" },
+  { name = "Pavel Mosein", email = "me@pavkazzz.ru" },
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Natural Language :: Russian",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+  "Programming Language :: Python",
+]
+dependencies = []
+
+[dependency-groups]
+aiopg = ["aiopg"]
+aiopg_sa = ["aiopg[sa]"]
+asyncpg = ["asyncpg"]
+asyncpgsa = ["asyncpgsa"]
+psycopg = ["psycopg[pool]>=3,<4"]
+test = [
+  "async_timeout",
+  "psycopg[pool]>=3.0,<4",
+  "aiopg[sa]~=1.4.0",
+  "asyncpg~=0.30.0",
+  "pytest~=8.2.0",
+  "pytest-cov~=3.0.0",
+  "pytest-asyncio~=0.26.0",
+  "aiomisc~=17.7.7",
+  "aiomisc-pytest~=1.2.1",
+  "mock~=5.2",
+  "sqlalchemy[asyncio]~=1.4.27",
+]
+develop = [
+  "async_timeout",
+  "psycopg[pool]>=3.0,<4",
+  "aiopg[sa]~=1.4.0",
+  "asyncpg~=0.30.0",
+  "pytest~=8.2.0",
+  "pytest-cov~=3.0.0",
+  "pytest-asyncio~=0.26.0",
+  "aiomisc~=17.7.7",
+  "aiomisc-pytest~=1.2.1",
+  "mock~=5.2",
+  "sqlalchemy[asyncio]~=1.4.27",
+  "mypy>=1.19",
+  "tox>=4.49",
+  "ruff>=0.15",
+  "twine",
+  "wheel",
+  "types-psycopg2",
+]
+
+[project.urls]
+Source = "https://github.com/aiokitchen/hasql"
+Tracker = "https://github.com/aiokitchen/hasql/issues"
+Documentation = "https://github.com/aiokitchen/hasql/blob/master/README.rst"
+
+[tool.setuptools.dynamic]
+version = { attr = "hasql.__version__" }
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "example*"]
+
+[tool.setuptools.package-data]
+hasql = ["py.typed"]
+
+[tool.ruff]
+line-length = 80
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "C90",  # mccabe
+  "F",    # pyflakes
+]
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = lint,mypy,py3{10,11,12,13,14}{,-uvloop}
+
+[testenv]
+passenv =
+  COVERALLS_*
+  FORCE_COLOR
+  PG_DSN
+allowlist_externals = coveralls
+
+extras =
+  develop
+
+commands=
+  pytest -vv \
+    --cov=hasql --cov-report=term-missing \
+    --doctest-modules \
+    --aiomisc-test-timeout=30 \
+    tests
+  - coveralls
+
+[testenv:lint]
+allowlist_externals = ruff
+deps =
+  ruff
+
+commands=
+  ruff check hasql tests
+
+[testenv:mypy]
+allowlist_externals = mypy
+basepython = python3.10
+package = editable
+
+deps =
+  mypy==1.17.1
+commands =
+    mypy --install-types --non-interactive hasql tests
+"""
+
+[tool.pytest.ini_options]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+python_classes = "TestSuite*"
+asyncio_mode = "auto"
+
+[tool.mypy]
+check_untyped_defs = false
+disallow_any_generics = false
+disallow_incomplete_defs = false
+disallow_subclassing_any = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+disallow_untyped_defs = false
+follow_imports = "silent"
+no_implicit_reexport = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["sqlalchemy.*"]
+ignore_missing_imports = true

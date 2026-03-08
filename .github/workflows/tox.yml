@@ -10,7 +10,6 @@ jobs:
   lint:
 
     runs-on: ubuntu-latest
-    container: snakepacker/python:all
 
     strategy:
       matrix:
@@ -20,6 +19,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
       - name: Install tox 4.49.0
         run: python3 -m pip install "tox==4.49.0"
       - name: Run tox ${{ matrix.linter }}
@@ -28,9 +30,7 @@ jobs:
           TOXENV: ${{ matrix.linter }}
 
   build:
-    needs: lint
     runs-on: ubuntu-latest
-    container: snakepacker/python:all
 
     services:
       postgres:
@@ -46,15 +46,23 @@ jobs:
       fail-fast: false
 
       matrix:
-        toxenv:
-          - py310
-          - py311
-          - py312
-          - py313
-          - py314
+        include:
+          - toxenv: py310
+            python-version: "3.10"
+          - toxenv: py311
+            python-version: "3.11"
+          - toxenv: py312
+            python-version: "3.12"
+          - toxenv: py313
+            python-version: "3.13"
+          - toxenv: py314
+            python-version: "3.14"
 
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
       - name: Install tox 4.49.0
         run: python3 -m pip install "tox==4.49.0"
       - name: Run tox ${{ matrix.toxenv }}
@@ -62,5 +70,5 @@ jobs:
         env:
           FORCE_COLOR: 1
           TOXENV: ${{ matrix.toxenv }}
-          PG_DSN: postgres://test:test@postgres:5432/test
+          PG_DSN: postgres://test:test@localhost:5432/test
           COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}

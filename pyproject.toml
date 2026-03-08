@@ -112,8 +112,8 @@ passenv =
   PG_DSN
 allowlist_externals = coveralls
 
-extras =
-  develop
+dependency_groups =
+  test
 
 commands=
   pytest -vv \
@@ -125,6 +125,7 @@ commands=
 
 [testenv:lint]
 allowlist_externals = ruff
+skip_install = true
 deps =
   ruff
 
@@ -135,6 +136,8 @@ commands=
 allowlist_externals = mypy
 basepython = python3.10
 package = editable
+dependency_groups =
+  test
 
 deps =
   mypy==1.17.1

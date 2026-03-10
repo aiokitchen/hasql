@@ -70,7 +70,7 @@ class PoolAcquireContext(AsyncContextManager):
         return remaining_timeout
 
     async def _get_pool(self, deadline: Optional[float]):
-        async def get_pool():
+        async def get_pool() -> Any:
             with self.metrics.with_get_pool():
                 return await self.pool_manager.balancer.get_pool(
                     read_only=self.read_only,

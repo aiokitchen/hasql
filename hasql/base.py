@@ -41,7 +41,7 @@ class PoolAcquireContext(AsyncContextManager):
         read_only: bool,
         fallback_master: Optional[bool],
         master_as_replica_weight: Optional[float],
-        timeout: float,
+        timeout: Optional[float],
         metrics: CalculateMetrics,
         **kwargs,
     ):
@@ -55,41 +55,73 @@ class PoolAcquireContext(AsyncContextManager):
         self.context = None
         self.metrics = metrics
 
-    async def acquire_from_pool_connection(self):
-        async def execute():
+    def _deadline(self) -> Optional[float]:
+        if self.timeout is None:
+            return None
+        return asyncio.get_running_loop().time() + self.timeout
+
+    def _remaining_timeout(self, deadline: Optional[float]) -> Optional[float]:
+        if deadline is None:
+            return None
+
+        remaining_timeout = deadline - asyncio.get_running_loop().time()
+        if remaining_timeout <= 0:
+            raise asyncio.TimeoutError
+        return remaining_timeout
+
+    async def _get_pool(self, deadline: Optional[float]):
+        async def get_pool():
             with self.metrics.with_get_pool():
-                self.pool = await self.pool_manager.balancer.get_pool(
+                return await self.pool_manager.balancer.get_pool(
                     read_only=self.read_only,
                     fallback_master=self.fallback_master,
                     master_as_replica_weight=self.master_as_replica_weight,
                 )
 
-            with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
-                return await self.pool_manager.acquire_from_pool(
-                    self.pool, **self.kwargs,
-                )
+        self.pool = await asyncio.wait_for(
+            get_pool(),
+            timeout=self._remaining_timeout(deadline),
+        )
+        return self.pool
 
-        self.conn = await asyncio.wait_for(execute(), timeout=self.timeout)
+    def _acquire_kwargs(self, deadline: Optional[float]) -> dict:
+        return self.pool_manager._prepare_acquire_kwargs(
+            self.kwargs,
+            timeout=self._remaining_timeout(deadline),
+        )
+
+    async def acquire_from_pool_connection(self):
+        deadline = self._deadline()
+        await self._get_pool(deadline)
+        acquire_kwargs = self._acquire_kwargs(deadline)
+
+        with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
+            self.conn = await asyncio.wait_for(
+                self.pool_manager.acquire_from_pool(
+                    self.pool, **acquire_kwargs,
+                ),
+                timeout=self._remaining_timeout(deadline),
+            )
+
         self.metrics.add_connection(self.pool_manager.host(self.pool))
         self.pool_manager.register_connection(self.conn, self.pool)
         return self.conn
 
     async def __aenter__(self):
-        async def go():
-            with self.metrics.with_get_pool():
-                self.pool = await self.pool_manager.balancer.get_pool(
-                    read_only=self.read_only,
-                    fallback_master=self.fallback_master,
-                    master_as_replica_weight=self.master_as_replica_weight,
-                )
-            with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
-                self.context = self.pool_manager.acquire_from_pool(
-                    self.pool,
-                    **self.kwargs,
-                )
-            return await self.context.__aenter__()
+        deadline = self._deadline()
+        await self._get_pool(deadline)
+        acquire_kwargs = self._acquire_kwargs(deadline)
 
-        self.conn = await asyncio.wait_for(go(), timeout=self.timeout)
+        with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
+            self.context = self.pool_manager.acquire_from_pool(
+                self.pool,
+                **acquire_kwargs,
+            )
+            self.conn = await asyncio.wait_for(
+                self.context.__aenter__(),
+                timeout=self._remaining_timeout(deadline),
+            )
+
         self.metrics.add_connection(self.pool_manager.host(self.pool))
         return self.conn
 
@@ -249,6 +281,13 @@ class BasePoolManager(ABC):
             drivers=self._driver_metrics(),
             hasql=self._metrics.metrics(),
         )
+
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: Optional[float],
+    ) -> dict:
+        return dict(kwargs)
 
     def acquire(
         self,
@@ -486,6 +525,8 @@ class BasePoolManager(ABC):
                     "Creating system connection failed for dsn=%r",
                     censored_dsn,
                 )
+                self._remove_pool_from_master_set(pool, dsn)
+                self._remove_pool_from_replica_set(pool, dsn)
             except asyncio.CancelledError as cancelled_error:
                 if self._closing:
                     raise cancelled_error from None
@@ -508,19 +549,19 @@ class BasePoolManager(ABC):
                 if sys_connection is not None:
                     try:
                         await self.release_to_pool(sys_connection, pool)
-                    except (Exception, asyncio.CancelledError):
-                        logger.warning(
-                            "Release connection to pool with "
-                            "exception for dsn=%r",
-                            censored_dsn,
-                            exc_info=True,
-                        )
                     except asyncio.CancelledError as cancelled_error:
                         if self._closing:
                             raise cancelled_error from None
                         logger.warning(
                             "Release connection to pool with "
                             "Cancelled error for dsn=%r",
+                            censored_dsn,
+                            exc_info=True,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Release connection to pool with "
+                            "exception for dsn=%r",
                             censored_dsn,
                             exc_info=True,
                         )

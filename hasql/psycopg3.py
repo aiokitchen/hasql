@@ -41,13 +41,14 @@ class PoolAcquireContext:
 class PoolManager(BasePoolManager):
     pools: Sequence[AsyncConnectionPool]
 
-    def __init__(self, dsn: str, **kwargs):
-        pool_factory_kwargs = kwargs.pop("pool_factory_kwargs", {})
-        pool_factory_kwargs["max_waiting"] = -1
-        super().__init__(
-            dsn,
-            pool_factory_kwargs=pool_factory_kwargs, **kwargs
-        )
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: Optional[float],
+    ) -> dict:
+        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
+        prepared_kwargs["timeout"] = timeout
+        return prepared_kwargs
 
     def get_pool_freesize(self, pool: AsyncConnectionPool):
         return pool.get_stats()["pool_available"]

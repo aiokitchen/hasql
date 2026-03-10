@@ -3,8 +3,10 @@ from contextlib import AsyncExitStack
 
 import mock
 import pytest
+pytest.importorskip("psycopg")
+pytest.importorskip("psycopg_pool")
 from psycopg import AsyncConnection
-from psycopg_pool import TooManyRequests
+from psycopg_pool import PoolTimeout, TooManyRequests
 
 from hasql.metrics import DriverMetrics
 from hasql.psycopg3 import PoolManager
@@ -73,7 +75,7 @@ async def test_acquire_with_timeout_context(pool_manager, pool_size):
     for _ in range(pool_size):
         conns.append(await pool_manager.acquire_master())
 
-    with pytest.raises(TooManyRequests):
+    with pytest.raises(PoolTimeout):
         await pool_manager.acquire_master()
 
     for conn in conns:
@@ -88,23 +90,56 @@ async def test_acquire_with_timeout_context(pool_manager, pool_size):
             pass
 
 
-async def test_acquire_with_timeout_context2(pool_manager, pool_size):
+@pytest.fixture
+async def queue_limited_pool_manager(pg_dsn, pool_size):
+    pg_pool = PoolManager(
+        dsn=pg_dsn,
+        fallback_master=True,
+        acquire_timeout=1,
+        pool_factory_kwargs={
+            "min_size": pool_size,
+            "max_size": pool_size,
+            "max_waiting": 1,
+        },
+    )
+    try:
+        await pg_pool.ready()
+        yield pg_pool
+    finally:
+        await pg_pool.close()
+
+
+async def test_acquire_with_queue_limit(queue_limited_pool_manager, pool_size):
     async with AsyncExitStack() as stack:
         for _ in range(pool_size):
-            await stack.enter_async_context(pool_manager.acquire_master())
+            await stack.enter_async_context(
+                queue_limited_pool_manager.acquire_master(),
+            )
 
-            async def wait_for_smth():
-                with pytest.raises(TooManyRequests):
-                    async with pool_manager.acquire_master():
-                        pass
+        async def wait_for_connection():
+            conn = await queue_limited_pool_manager.acquire_master()
+            await queue_limited_pool_manager.release(conn)
 
-        await asyncio.gather(*[wait_for_smth() for _ in range(pool_size)])
+        waiter = asyncio.create_task(wait_for_connection())
+        await asyncio.sleep(0.1)
 
-    for pool in pool_manager.pools:
-        assert pool_manager.get_pool_freesize(pool) == pool_size
+        with pytest.raises(TooManyRequests):
+            await queue_limited_pool_manager.acquire_master()
 
-    async with AsyncExitStack() as stack:
-        await stack.enter_async_context(pool_manager.acquire_master())
+        assert not waiter.done()
+
+    await waiter
+
+
+def test_prepare_acquire_kwargs_sets_timeout():
+    pool_manager = PoolManager.__new__(PoolManager)
+    assert pool_manager._prepare_acquire_kwargs(
+        {"row_factory": mock.ANY},
+        timeout=0.25,
+    ) == {
+        "row_factory": mock.ANY,
+        "timeout": 0.25,
+    }
 
 
 async def test_metrics(pool_manager):

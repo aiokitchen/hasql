@@ -1,5 +1,5 @@
 import asyncio
-from typing import ClassVar, Dict, Sequence
+from typing import ClassVar, Dict, Optional, Sequence
 
 import asyncpg  # type: ignore
 from packaging.version import parse as parse_version
@@ -12,6 +12,15 @@ from hasql.utils import Dsn
 class PoolManager(BasePoolManager):
     pools: Sequence[asyncpg.Pool]
     cached_hosts: ClassVar[Dict[int, str]] = {}
+
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: Optional[float],
+    ) -> dict:
+        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
+        prepared_kwargs["timeout"] = timeout
+        return prepared_kwargs
 
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()

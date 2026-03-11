@@ -16,7 +16,7 @@ class PoolManager(BasePoolManager):
     def _prepare_acquire_kwargs(
         self,
         kwargs: dict,
-        timeout: Optional[float],
+        timeout: float,
     ) -> dict:
         prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
         prepared_kwargs["_timeout"] = timeout

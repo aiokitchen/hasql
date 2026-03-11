@@ -72,7 +72,7 @@ class PoolAcquireContext(AsyncContextManager):
         pool_manager: "BasePoolManager",
         read_only: bool,
         master_as_replica_weight: Optional[float],
-        timeout: Optional[float],
+        timeout: float,
         metrics: CalculateMetrics,
         fallback_master: bool = False,
         **kwargs,
@@ -87,21 +87,16 @@ class PoolAcquireContext(AsyncContextManager):
         self.context: Any = None
         self.metrics = metrics
 
-    def _deadline(self) -> Optional[float]:
-        if self.timeout is None:
-            return None
+    def _deadline(self) -> float:
         return asyncio.get_running_loop().time() + self.timeout
 
-    def _remaining_timeout(self, deadline: Optional[float]) -> Optional[float]:
-        if deadline is None:
-            return None
-
+    def _remaining_timeout(self, deadline: float) -> float:
         remaining_timeout = deadline - asyncio.get_running_loop().time()
         if remaining_timeout <= 0:
             raise asyncio.TimeoutError
         return remaining_timeout
 
-    async def _get_pool(self, deadline: Optional[float]):
+    async def _get_pool(self, deadline: float):
         async def get_pool() -> Any:
             with self.metrics.with_get_pool():
                 return await self.pool_manager.balancer.get_pool(
@@ -116,7 +111,7 @@ class PoolAcquireContext(AsyncContextManager):
         )
         return self.pool
 
-    def _acquire_kwargs(self, deadline: Optional[float]) -> dict:
+    def _acquire_kwargs(self, deadline: float) -> dict:
         return self.pool_manager._prepare_acquire_kwargs(
             self.kwargs,
             timeout=self._remaining_timeout(deadline),
@@ -313,7 +308,7 @@ class BasePoolManager(ABC):
     def _prepare_acquire_kwargs(
         self,
         kwargs: dict,
-        timeout: Optional[float],
+        timeout: float,
     ) -> dict:
         return dict(kwargs)
 

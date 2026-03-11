@@ -13,6 +13,15 @@ class PoolManager(BasePoolManager):
     pools: Sequence[asyncpg.Pool]
     cached_hosts: ClassVar[Dict[int, str]] = {}
 
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: float,
+    ) -> dict:
+        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
+        prepared_kwargs["timeout"] = timeout
+        return prepared_kwargs
+
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()
 

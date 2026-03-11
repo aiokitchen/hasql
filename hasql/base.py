@@ -4,18 +4,55 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from itertools import chain
 from types import MappingProxyType
-from typing import (Any, AsyncContextManager, DefaultDict, Dict, List,
-                    Optional, Sequence, Set, Union)
+from typing import (
+    Any,
+    AsyncContextManager,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Union,
+)
 
 from .metrics import CalculateMetrics, DriverMetrics, Metrics
 from .utils import Dsn, Stopwatch, split_dsn
 
 logger = logging.getLogger(__name__)
 
+
+class TimeoutAcquireContext:
+    __slots__ = ("_context", "_timeout")
+
+    def __init__(self, context, timeout: float):
+        self._context = context
+        self._timeout = timeout
+
+    async def __aenter__(self):
+        return await asyncio.wait_for(
+            self._context.__aenter__(),
+            timeout=self._timeout,
+        )
+
+    async def __aexit__(self, *exc):
+        # TODO: consider adding a bounded timeout here. Currently if the
+        #  underlying driver hangs during connection release this will block
+        #  indefinitely. A timeout risks leaking the connection (not returned
+        #  to pool), so this needs careful design.
+        await self._context.__aexit__(*exc)
+
+    def __await__(self):
+        return asyncio.wait_for(
+            self._context.__aenter__(),
+            timeout=self._timeout,
+        ).__await__()
+
+
 DEFAULT_REFRESH_DELAY: int = 1
 DEFAULT_REFRESH_TIMEOUT: int = 30
 DEFAULT_ACQUIRE_TIMEOUT: float = 1.0
-DEFAULT_MASTER_AS_REPLICA_WEIGHT: float = 0.
+DEFAULT_MASTER_AS_REPLICA_WEIGHT: float = 0.0
 DEFAULT_STOPWATCH_WINDOW_SIZE: int = 128
 
 
@@ -34,15 +71,14 @@ class AbstractBalancerPolicy(ABC):
 
 
 class PoolAcquireContext(AsyncContextManager):
-
     def __init__(
         self,
         pool_manager: "BasePoolManager",
         read_only: bool,
-        fallback_master: Optional[bool],
         master_as_replica_weight: Optional[float],
         timeout: float,
         metrics: CalculateMetrics,
+        fallback_master: bool = False,
         **kwargs,
     ):
         self.pool_manager = pool_manager
@@ -51,45 +87,71 @@ class PoolAcquireContext(AsyncContextManager):
         self.master_as_replica_weight = master_as_replica_weight
         self.timeout = timeout
         self.kwargs = kwargs
-        self.pool = None
-        self.context = None
+        self.pool: Any = None
+        self.context: Any = None
         self.metrics = metrics
 
-    async def acquire_from_pool_connection(self):
-        async def execute():
+    def _deadline(self) -> float:
+        return asyncio.get_running_loop().time() + self.timeout
+
+    def _remaining_timeout(self, deadline: float) -> float:
+        remaining_timeout = deadline - asyncio.get_running_loop().time()
+        if remaining_timeout <= 0:
+            raise asyncio.TimeoutError
+        return remaining_timeout
+
+    # TODO: make _get_pool a clean function (return pool without mutating
+    #  self.pool) and extract the shared preamble between __aenter__ /
+    #  acquire_from_pool_connection into a helper.
+    async def _get_pool(self, deadline: float):
+        async def get_pool() -> Any:
             with self.metrics.with_get_pool():
-                self.pool = await self.pool_manager.balancer.get_pool(
+                return await self.pool_manager.balancer.get_pool(
                     read_only=self.read_only,
                     fallback_master=self.fallback_master,
                     master_as_replica_weight=self.master_as_replica_weight,
                 )
 
-            with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
-                return await self.pool_manager.acquire_from_pool(
-                    self.pool, **self.kwargs,
-                )
+        self.pool = await asyncio.wait_for(
+            get_pool(),
+            timeout=self._remaining_timeout(deadline),
+        )
+        return self.pool
 
-        self.conn = await asyncio.wait_for(execute(), timeout=self.timeout)
+    def _acquire_kwargs(self, deadline: float) -> dict:
+        return self.pool_manager._prepare_acquire_kwargs(
+            self.kwargs,
+            timeout=self._remaining_timeout(deadline),
+        )
+
+    async def _resolve_pool_and_kwargs(self):
+        deadline = self._deadline()
+        await self._get_pool(deadline)
+        return self._acquire_kwargs(deadline)
+
+    async def acquire_from_pool_connection(self):
+        acquire_kwargs = await self._resolve_pool_and_kwargs()
+
+        with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
+            self.conn = await self.pool_manager.acquire_from_pool(
+                self.pool,
+                **acquire_kwargs,
+            )
+
         self.metrics.add_connection(self.pool_manager.host(self.pool))
         self.pool_manager.register_connection(self.conn, self.pool)
         return self.conn
 
     async def __aenter__(self):
-        async def go():
-            with self.metrics.with_get_pool():
-                self.pool = await self.pool_manager.balancer.get_pool(
-                    read_only=self.read_only,
-                    fallback_master=self.fallback_master,
-                    master_as_replica_weight=self.master_as_replica_weight,
-                )
-            with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
-                self.context = self.pool_manager.acquire_from_pool(
-                    self.pool,
-                    **self.kwargs,
-                )
-            return await self.context.__aenter__()
+        acquire_kwargs = await self._resolve_pool_and_kwargs()
 
-        self.conn = await asyncio.wait_for(go(), timeout=self.timeout)
+        with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
+            self.context = self.pool_manager.acquire_from_pool(
+                self.pool,
+                **acquire_kwargs,
+            )
+            self.conn = await self.context.__aenter__()
+
         self.metrics.add_connection(self.pool_manager.host(self.pool))
         return self.conn
 
@@ -129,6 +191,7 @@ class BasePoolManager(ABC):
         if balancer_policy is AbstractBalancerPolicy:
             # Avoid circular import
             from .balancer_policy.greedy import GreedyBalancerPolicy
+
             balancer_policy = GreedyBalancerPolicy
 
         if pool_factory_kwargs is None:
@@ -250,6 +313,13 @@ class BasePoolManager(ABC):
             hasql=self._metrics.metrics(),
         )
 
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: float,
+    ) -> dict:
+        return dict(kwargs)
+
     def acquire(
         self,
         read_only: bool = False,
@@ -266,9 +336,8 @@ class BasePoolManager(ABC):
                 "Field master_as_replica_weight is used only when "
                 "read_only is True",
             )
-        if (
-            master_as_replica_weight is not None and
-            not (0. <= master_as_replica_weight <= 1)
+        if master_as_replica_weight is not None and not (
+            0.0 <= master_as_replica_weight <= 1
         ):
             raise ValueError(
                 "Field master_as_replica_weight must belong "
@@ -295,7 +364,9 @@ class BasePoolManager(ABC):
         return ctx
 
     def acquire_master(
-        self, timeout: Optional[float] = None, **kwargs,
+        self,
+        timeout: Optional[float] = None,
+        **kwargs,
     ):
         return self.acquire(read_only=False, timeout=timeout, **kwargs)
 
@@ -361,9 +432,8 @@ class BasePoolManager(ABC):
         timeout: int = 10,
     ):
 
-        if (
-            (masters_count is not None and replicas_count is None) or
-            (masters_count is None and replicas_count is not None)
+        if (masters_count is not None and replicas_count is None) or (
+            masters_count is None and replicas_count is not None
         ):
             raise ValueError(
                 "Arguments master_count and replicas_count "
@@ -386,7 +456,8 @@ class BasePoolManager(ABC):
             asyncio.gather(
                 self.wait_masters_ready(masters_count),
                 self.wait_replicas_ready(replicas_count),
-            ), timeout=timeout,
+            ),
+            timeout=timeout,
         )
 
     async def wait_all_ready(self):
@@ -473,10 +544,12 @@ class BasePoolManager(ABC):
                 # Не использовать async with self.acquire_from_pool(pool)
                 # из-за большого таймаута
                 logger.debug(
-                    "Acquiring connection for checking dsn=%r", censored_dsn,
+                    "Acquiring connection for checking dsn=%r",
+                    censored_dsn,
                 )
                 sys_connection = await asyncio.wait_for(
-                    self.acquire_from_pool(pool), timeout=self._refresh_timeout,
+                    self.acquire_from_pool(pool),
+                    timeout=self._refresh_timeout,
                 )
 
                 logger.debug("Checking dsn=%r", censored_dsn)
@@ -486,6 +559,8 @@ class BasePoolManager(ABC):
                     "Creating system connection failed for dsn=%r",
                     censored_dsn,
                 )
+                self._remove_pool_from_master_set(pool, dsn)
+                self._remove_pool_from_replica_set(pool, dsn)
             except asyncio.CancelledError as cancelled_error:
                 if self._closing:
                     raise cancelled_error from None
@@ -508,19 +583,19 @@ class BasePoolManager(ABC):
                 if sys_connection is not None:
                     try:
                         await self.release_to_pool(sys_connection, pool)
-                    except (Exception, asyncio.CancelledError):
-                        logger.warning(
-                            "Release connection to pool with "
-                            "exception for dsn=%r",
-                            censored_dsn,
-                            exc_info=True,
-                        )
                     except asyncio.CancelledError as cancelled_error:
                         if self._closing:
                             raise cancelled_error from None
                         logger.warning(
                             "Release connection to pool with "
                             "Cancelled error for dsn=%r",
+                            censored_dsn,
+                            exc_info=True,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Release connection to pool with "
+                            "exception for dsn=%r",
                             censored_dsn,
                             exc_info=True,
                         )
@@ -627,4 +702,8 @@ class BasePoolManager(ABC):
         await self.close()
 
 
-__all__ = ("BasePoolManager", "AbstractBalancerPolicy")
+__all__ = (
+    "BasePoolManager",
+    "AbstractBalancerPolicy",
+    "TimeoutAcquireContext",
+)

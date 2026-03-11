@@ -9,6 +9,17 @@ from hasql.asyncsqlalchemy import PoolManager, async_sessionmaker
 from hasql.metrics import DriverMetrics
 
 
+def test_prepare_acquire_kwargs_sets_timeout():
+    pool_manager = PoolManager.__new__(PoolManager)
+    assert pool_manager._prepare_acquire_kwargs(
+        {"some_kwarg": 1},
+        timeout=0.25,
+    ) == {
+        "some_kwarg": 1,
+        "_timeout": 0.25,
+    }
+
+
 @pytest.fixture
 async def pool_manager(pg_dsn):
     pg_pool = PoolManager(

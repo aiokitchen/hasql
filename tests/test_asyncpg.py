@@ -58,3 +58,14 @@ async def test_metrics(pool_manager):
         assert pool_manager.metrics().drivers == [
             DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
         ]
+
+
+def test_prepare_acquire_kwargs_sets_timeout():
+    pool_manager = PoolManager.__new__(PoolManager)
+    assert pool_manager._prepare_acquire_kwargs(
+        {"statement_cache_size": 0},
+        timeout=0.25,
+    ) == {
+        "statement_cache_size": 0,
+        "timeout": 0.25,
+    }

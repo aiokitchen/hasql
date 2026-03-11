@@ -3,7 +3,7 @@ from typing import Sequence
 
 import aiopg
 
-from hasql.base import BasePoolManager
+from hasql.base import BasePoolManager, TimeoutAcquireContext
 from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
@@ -11,11 +11,26 @@ from hasql.utils import Dsn
 class PoolManager(BasePoolManager):
     pools: Sequence[aiopg.Pool]
 
+    # TODO: _timeout is a smuggled kwarg key — consider returning a
+    #  (kwargs, timeout) tuple from _prepare_acquire_kwargs instead.
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: float,
+    ) -> dict:
+        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
+        prepared_kwargs["_timeout"] = timeout
+        return prepared_kwargs
+
     def get_pool_freesize(self, pool):
         return pool.freesize
 
     def acquire_from_pool(self, pool, **kwargs):
-        return pool.acquire(**kwargs)
+        timeout = kwargs.pop("_timeout", None)
+        ctx = pool.acquire(**kwargs)
+        if timeout is not None:
+            return TimeoutAcquireContext(ctx, timeout)
+        return ctx
 
     async def release_to_pool(self, connection, pool, **kwargs):
         return await pool.release(connection, **kwargs)

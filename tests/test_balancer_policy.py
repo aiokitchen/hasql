@@ -33,7 +33,9 @@ def make_dsn():
 
 
 @pytest.fixture
-def make_pool_manager(make_dsn):
+async def make_pool_manager(make_dsn):
+    pool_managers = []
+
     async def make(balancer_policy, replicas_count: int = 2):
         pool_manager = TestPoolManager(
             dsn=make_dsn(replicas_count),
@@ -42,9 +44,16 @@ def make_pool_manager(make_dsn):
             refresh_delay=0.1,
             acquire_timeout=0.1,
         )
+        pool_managers.append(pool_manager)
         return pool_manager
 
-    return make
+    try:
+        yield make
+    finally:
+        await asyncio.gather(
+            *(pool_manager.close() for pool_manager in pool_managers),
+            return_exceptions=True,
+        )
 
 
 @balancer_policies

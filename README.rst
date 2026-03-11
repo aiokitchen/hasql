@@ -211,6 +211,10 @@ For ``psycopg3``
 ~~~~~~~~~~~~~~~~
 
 **psycopg3** must be installed as a requirement (package name is `psycopg`)
+Configure queue limits explicitly with
+``pool_factory_kwargs={"max_waiting": ...}`` if you want
+``psycopg_pool.TooManyRequests`` on pool saturation. Otherwise the driver
+default queue behavior is used.
 
 .. code-block:: python
 
@@ -330,7 +334,7 @@ Overview
           between host polls. 1 sec by default.
 
         * ``refresh_timeout: Union[int, float]`` - Timeout (in seconds) for
-          trying to connect and get the host role. 1 sec by default.
+          trying to connect and get the host role. 30 sec by default.
 
         * ``fallback_master: bool`` - Use connections from master if replicas
           are missing. False by default.

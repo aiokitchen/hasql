@@ -4,8 +4,17 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from itertools import chain
 from types import MappingProxyType
-from typing import (Any, AsyncContextManager, DefaultDict, Dict, List,
-                    Optional, Sequence, Set, Union)
+from typing import (
+    Any,
+    AsyncContextManager,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Union,
+)
 
 from .metrics import CalculateMetrics, DriverMetrics, Metrics
 from .utils import Dsn, Stopwatch, split_dsn
@@ -35,10 +44,11 @@ class TimeoutAcquireContext:
             timeout=self._timeout,
         ).__await__()
 
+
 DEFAULT_REFRESH_DELAY: int = 1
 DEFAULT_REFRESH_TIMEOUT: int = 30
 DEFAULT_ACQUIRE_TIMEOUT: float = 1.0
-DEFAULT_MASTER_AS_REPLICA_WEIGHT: float = 0.
+DEFAULT_MASTER_AS_REPLICA_WEIGHT: float = 0.0
 DEFAULT_STOPWATCH_WINDOW_SIZE: int = 128
 
 
@@ -57,15 +67,14 @@ class AbstractBalancerPolicy(ABC):
 
 
 class PoolAcquireContext(AsyncContextManager):
-
     def __init__(
         self,
         pool_manager: "BasePoolManager",
         read_only: bool,
-        fallback_master: Optional[bool],
         master_as_replica_weight: Optional[float],
         timeout: Optional[float],
         metrics: CalculateMetrics,
+        fallback_master: bool = False,
         **kwargs,
     ):
         self.pool_manager = pool_manager
@@ -74,8 +83,8 @@ class PoolAcquireContext(AsyncContextManager):
         self.master_as_replica_weight = master_as_replica_weight
         self.timeout = timeout
         self.kwargs = kwargs
-        self.pool = None
-        self.context = None
+        self.pool: Any = None
+        self.context: Any = None
         self.metrics = metrics
 
     def _deadline(self) -> Optional[float]:
@@ -120,7 +129,8 @@ class PoolAcquireContext(AsyncContextManager):
 
         with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
             self.conn = await self.pool_manager.acquire_from_pool(
-                self.pool, **acquire_kwargs,
+                self.pool,
+                **acquire_kwargs,
             )
 
         self.metrics.add_connection(self.pool_manager.host(self.pool))
@@ -178,6 +188,7 @@ class BasePoolManager(ABC):
         if balancer_policy is AbstractBalancerPolicy:
             # Avoid circular import
             from .balancer_policy.greedy import GreedyBalancerPolicy
+
             balancer_policy = GreedyBalancerPolicy
 
         if pool_factory_kwargs is None:
@@ -322,9 +333,8 @@ class BasePoolManager(ABC):
                 "Field master_as_replica_weight is used only when "
                 "read_only is True",
             )
-        if (
-            master_as_replica_weight is not None and
-            not (0. <= master_as_replica_weight <= 1)
+        if master_as_replica_weight is not None and not (
+            0.0 <= master_as_replica_weight <= 1
         ):
             raise ValueError(
                 "Field master_as_replica_weight must belong "
@@ -351,7 +361,9 @@ class BasePoolManager(ABC):
         return ctx
 
     def acquire_master(
-        self, timeout: Optional[float] = None, **kwargs,
+        self,
+        timeout: Optional[float] = None,
+        **kwargs,
     ):
         return self.acquire(read_only=False, timeout=timeout, **kwargs)
 
@@ -417,9 +429,8 @@ class BasePoolManager(ABC):
         timeout: int = 10,
     ):
 
-        if (
-            (masters_count is not None and replicas_count is None) or
-            (masters_count is None and replicas_count is not None)
+        if (masters_count is not None and replicas_count is None) or (
+            masters_count is None and replicas_count is not None
         ):
             raise ValueError(
                 "Arguments master_count and replicas_count "
@@ -442,7 +453,8 @@ class BasePoolManager(ABC):
             asyncio.gather(
                 self.wait_masters_ready(masters_count),
                 self.wait_replicas_ready(replicas_count),
-            ), timeout=timeout,
+            ),
+            timeout=timeout,
         )
 
     async def wait_all_ready(self):
@@ -529,10 +541,12 @@ class BasePoolManager(ABC):
                 # Не использовать async with self.acquire_from_pool(pool)
                 # из-за большого таймаута
                 logger.debug(
-                    "Acquiring connection for checking dsn=%r", censored_dsn,
+                    "Acquiring connection for checking dsn=%r",
+                    censored_dsn,
                 )
                 sys_connection = await asyncio.wait_for(
-                    self.acquire_from_pool(pool), timeout=self._refresh_timeout,
+                    self.acquire_from_pool(pool),
+                    timeout=self._refresh_timeout,
                 )
 
                 logger.debug("Checking dsn=%r", censored_dsn)

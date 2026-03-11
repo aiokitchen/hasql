@@ -5,8 +5,8 @@ import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from typing import (
-    Any, DefaultDict, Deque, Dict, Generator, Iterable, List, Optional, Tuple,
-    Union,
+    Any, DefaultDict, Deque, Dict, Generator, Generic, Iterable, List,
+    Optional, Tuple, TypeVar, Union,
 )
 from urllib.parse import unquote, urlencode
 
@@ -297,14 +297,17 @@ def split_dsn(dsn: Union[Dsn, str], default_port: int = 5432) -> List[Dsn]:
     )
 
 
-class Stopwatch:
+KeyT = TypeVar("KeyT")
+
+
+class Stopwatch(Generic[KeyT]):
     def __init__(self, window_size: int):
-        self._times: DefaultDict[Any, Deque] = defaultdict(
+        self._times: DefaultDict[KeyT, Deque[float]] = defaultdict(
             lambda: deque(maxlen=window_size),
         )
-        self._cache: Dict[Any, Optional[int]] = {}
+        self._cache: Dict[KeyT, Optional[float]] = {}
 
-    def get_time(self, obj: Any) -> Optional[float]:
+    def get_time(self, obj: KeyT) -> Optional[float]:
         if obj not in self._times:
             return None
         if self._cache.get(obj) is None:
@@ -312,7 +315,7 @@ class Stopwatch:
         return self._cache[obj]
 
     @contextmanager
-    def __call__(self, obj: Any) -> Generator[None, None, None]:
+    def __call__(self, obj: KeyT) -> Generator[None, None, None]:
         start_at = time.monotonic()
         yield
         self._times[obj].append(time.monotonic() - start_at)

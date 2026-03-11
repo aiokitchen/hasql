@@ -38,8 +38,7 @@ class PoolAcquireContext:
         return self.pool.getconn(self.timeout).__await__()
 
 
-class PoolManager(BasePoolManager):
-    pools: Sequence[AsyncConnectionPool]
+class PoolManager(BasePoolManager[AsyncConnectionPool, AsyncConnection]):
 
     def _prepare_acquire_kwargs(
         self,
@@ -67,7 +66,9 @@ class PoolManager(BasePoolManager):
     async def _is_master(self, connection: AsyncConnection):
         async with connection.cursor() as cur:
             await cur.execute("SHOW transaction_read_only")
-            return (await cur.fetchone())[0] == "off"       # type: ignore
+            row = await cur.fetchone()
+            assert row is not None
+            return row[0] == "off"
 
     async def _pool_factory(self, dsn: Dsn) -> AsyncConnectionPool:
         pool = AsyncConnectionPool(

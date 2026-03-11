@@ -12,7 +12,7 @@ from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
-class PoolManager(BasePoolManager):
+class PoolManager(BasePoolManager[AsyncEngine, AsyncConnection]):
     # TODO: _timeout is a smuggled kwarg key — consider returning a
     #  (kwargs, timeout) tuple from _prepare_acquire_kwargs instead.
     def _prepare_acquire_kwargs(
@@ -35,11 +35,11 @@ class PoolManager(BasePoolManager):
             return TimeoutAcquireContext(ctx, timeout)
         return ctx
 
-    async def release_to_pool(      # type: ignore
+    async def release_to_pool(
         self,
         connection: AsyncConnection,
-        _: AsyncEngine,
-        **kwargs
+        pool: AsyncEngine,
+        **kwargs,
     ):
         await connection.close()
 

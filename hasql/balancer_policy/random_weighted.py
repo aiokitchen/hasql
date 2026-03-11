@@ -2,18 +2,19 @@ import random
 from typing import Iterable, Optional
 
 from hasql.balancer_policy.base import BaseBalancerPolicy
+from hasql.base import PoolT
 
 
 MACHINE_EPSILON: float = 1e-16
 
 
-class RandomWeightedBalancerPolicy(BaseBalancerPolicy):
+class RandomWeightedBalancerPolicy(BaseBalancerPolicy[PoolT]):
     async def _get_pool(
         self,
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ):
+    ) -> PoolT:
         candidates = []
 
         if read_only:

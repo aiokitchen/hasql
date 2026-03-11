@@ -1,8 +1,9 @@
 from collections import defaultdict
 from types import MappingProxyType
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from hasql.balancer_policy.base import BaseBalancerPolicy
+from hasql.base import BasePoolManager, PoolT
 
 
 class PoolOptions(NamedTuple):
@@ -10,10 +11,10 @@ class PoolOptions(NamedTuple):
     choose_master_as_replica: bool
 
 
-class RoundRobinBalancerPolicy(BaseBalancerPolicy):
-    def __init__(self, pool_manager):
+class RoundRobinBalancerPolicy(BaseBalancerPolicy[PoolT]):
+    def __init__(self, pool_manager: BasePoolManager[PoolT, Any]):
         super().__init__(pool_manager)
-        self._indexes = defaultdict(lambda: 0)
+        self._indexes: defaultdict[PoolOptions, int] = defaultdict(lambda: 0)
         self._choose_predicates = MappingProxyType({
             PoolOptions(True, False): self._replica_predicate,
             PoolOptions(True, True): self._master_as_replica_predicate,

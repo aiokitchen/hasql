@@ -3,16 +3,20 @@ import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from itertools import chain
-from types import MappingProxyType
+from types import MappingProxyType, TracebackType
 from typing import (
     Any,
     AsyncContextManager,
     DefaultDict,
     Dict,
+    Generator,
+    Generic,
     List,
     Optional,
+    Protocol,
     Sequence,
     Set,
+    TypeVar,
     Union,
 )
 
@@ -21,28 +25,43 @@ from .utils import Dsn, Stopwatch, split_dsn
 
 logger = logging.getLogger(__name__)
 
+PoolT = TypeVar("PoolT")
+ConnT = TypeVar("ConnT")
+ConnT_co = TypeVar("ConnT_co", covariant=True)
 
-class TimeoutAcquireContext:
+
+class AcquireContext(Protocol[ConnT_co]):
+    async def __aenter__(self) -> ConnT: ...
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> Optional[bool]: ...
+    def __await__(self) -> Generator[Any, None, ConnT]: ...
+
+
+class TimeoutAcquireContext(Generic[ConnT]):
     __slots__ = ("_context", "_timeout")
 
-    def __init__(self, context, timeout: float):
+    def __init__(self, context: AcquireContext[ConnT], timeout: float):
         self._context = context
         self._timeout = timeout
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> ConnT:
         return await asyncio.wait_for(
             self._context.__aenter__(),
             timeout=self._timeout,
         )
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, *exc) -> None:
         # TODO: consider adding a bounded timeout here. Currently if the
         #  underlying driver hangs during connection release this will block
         #  indefinitely. A timeout risks leaking the connection (not returned
         #  to pool), so this needs careful design.
         await self._context.__aexit__(*exc)
 
-    def __await__(self):
+    def __await__(self) -> Generator[Any, None, ConnT]:
         return asyncio.wait_for(
             self._context.__aenter__(),
             timeout=self._timeout,
@@ -56,8 +75,8 @@ DEFAULT_MASTER_AS_REPLICA_WEIGHT: float = 0.0
 DEFAULT_STOPWATCH_WINDOW_SIZE: int = 128
 
 
-class AbstractBalancerPolicy(ABC):
-    def __init__(self, pool_manager: "BasePoolManager"):
+class AbstractBalancerPolicy(ABC, Generic[PoolT]):
+    def __init__(self, pool_manager: "BasePoolManager[PoolT, Any]"):
         raise NotImplementedError
 
     @abstractmethod
@@ -66,14 +85,14 @@ class AbstractBalancerPolicy(ABC):
         read_only: bool,
         fallback_master: bool = False,
         master_as_replica_weight: Optional[float] = None,
-    ) -> Any:
+    ) -> PoolT:
         raise NotImplementedError
 
 
-class PoolAcquireContext(AsyncContextManager):
+class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
     def __init__(
         self,
-        pool_manager: "BasePoolManager",
+        pool_manager: "BasePoolManager[PoolT, ConnT]",
         read_only: bool,
         master_as_replica_weight: Optional[float],
         timeout: float,
@@ -87,8 +106,8 @@ class PoolAcquireContext(AsyncContextManager):
         self.master_as_replica_weight = master_as_replica_weight
         self.timeout = timeout
         self.kwargs = kwargs
-        self.pool: Any = None
-        self.context: Any = None
+        self.pool: Optional[PoolT] = None
+        self.context: Optional[AcquireContext[ConnT]] = None
         self.metrics = metrics
 
     def _deadline(self) -> float:
@@ -103,8 +122,8 @@ class PoolAcquireContext(AsyncContextManager):
     # TODO: make _get_pool a clean function (return pool without mutating
     #  self.pool) and extract the shared preamble between __aenter__ /
     #  acquire_from_pool_connection into a helper.
-    async def _get_pool(self, deadline: float):
-        async def get_pool() -> Any:
+    async def _get_pool(self, deadline: float) -> PoolT:
+        async def get_pool() -> PoolT:
             with self.metrics.with_get_pool():
                 return await self.pool_manager.balancer.get_pool(
                     read_only=self.read_only,
@@ -129,11 +148,12 @@ class PoolAcquireContext(AsyncContextManager):
         await self._get_pool(deadline)
         return self._acquire_kwargs(deadline)
 
-    async def acquire_from_pool_connection(self):
+    async def acquire_from_pool_connection(self) -> ConnT:
         acquire_kwargs = await self._resolve_pool_and_kwargs()
+        assert self.pool is not None
 
         with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
-            self.conn = await self.pool_manager.acquire_from_pool(
+            self.conn: ConnT = await self.pool_manager.acquire_from_pool(
                 self.pool,
                 **acquire_kwargs,
             )
@@ -142,8 +162,9 @@ class PoolAcquireContext(AsyncContextManager):
         self.pool_manager.register_connection(self.conn, self.pool)
         return self.conn
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> ConnT:
         acquire_kwargs = await self._resolve_pool_and_kwargs()
+        assert self.pool is not None
 
         with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
             self.context = self.pool_manager.acquire_from_pool(
@@ -156,6 +177,7 @@ class PoolAcquireContext(AsyncContextManager):
         return self.conn
 
     async def __aexit__(self, *exc):
+        assert self.pool is not None
         self.metrics.remove_connection(self.pool_manager.host(self.pool))
         await self.context.__aexit__(*exc)
         del self.conn
@@ -164,12 +186,12 @@ class PoolAcquireContext(AsyncContextManager):
         return self.acquire_from_pool_connection().__await__()
 
 
-class BasePoolManager(ABC):
+class BasePoolManager(ABC, Generic[PoolT, ConnT]):
     _dsn_ready_event: DefaultDict[Dsn, asyncio.Event]
     _dsn_check_cond: DefaultDict[Dsn, asyncio.Condition]
-    _master_pool_set: Set[Any]
-    _replica_pool_set: Set[Any]
-    _unmanaged_connections: Dict[Any, Any]
+    _master_pool_set: Set[PoolT]
+    _replica_pool_set: Set[PoolT]
+    _unmanaged_connections: Dict[ConnT, PoolT]
 
     def __init__(
         self,
@@ -202,19 +224,21 @@ class BasePoolManager(ABC):
         self._dsn: List[Dsn] = split_dsn(dsn)
         self._dsn_ready_event = defaultdict(asyncio.Event)
         self._dsn_check_cond = defaultdict(asyncio.Condition)
-        self._pools = [None] * len(self._dsn)
+        self._pools: List[Optional[PoolT]] = [None] * len(self._dsn)
         self._acquire_timeout = acquire_timeout
         self._refresh_delay = refresh_delay
         self._refresh_timeout = refresh_timeout
         self._fallback_master = fallback_master
         self._master_as_replica_weight = master_as_replica_weight
-        self._balancer = balancer_policy(self)
-        self._master_pool_set = set()
-        self._replica_pool_set = set()
+        self._balancer: AbstractBalancerPolicy[PoolT] = balancer_policy(self)
+        self._master_pool_set: Set[PoolT] = set()
+        self._replica_pool_set: Set[PoolT] = set()
         self._master_cond = asyncio.Condition()
         self._replica_cond = asyncio.Condition()
-        self._unmanaged_connections = {}
-        self._stopwatch = Stopwatch(window_size=stopwatch_window_size)
+        self._unmanaged_connections: Dict[ConnT, PoolT] = {}
+        self._stopwatch: Stopwatch[PoolT] = Stopwatch(
+            window_size=stopwatch_window_size,
+        )
         self._refresh_role_tasks = [
             asyncio.create_task(self._check_pool_task(index))
             for index in range(len(self._dsn))
@@ -252,7 +276,7 @@ class BasePoolManager(ABC):
         return self.master_pool_count + self.replica_pool_count
 
     @property
-    def balancer(self) -> AbstractBalancerPolicy:
+    def balancer(self) -> AbstractBalancerPolicy[PoolT]:
         return self._balancer
 
     @property
@@ -264,43 +288,45 @@ class BasePoolManager(ABC):
         return self._closed
 
     @property
-    def pools(self) -> Sequence[Any]:
+    def pools(self) -> Sequence[Optional[PoolT]]:
         return tuple(self._pools)
 
     @abstractmethod
-    def get_pool_freesize(self, pool):
+    def get_pool_freesize(self, pool: PoolT) -> int:
         pass
 
     @abstractmethod
-    def acquire_from_pool(self, pool, **kwargs):
+    def acquire_from_pool(self, pool: PoolT, **kwargs) -> AcquireContext[ConnT]:
         pass
 
     @abstractmethod
-    async def release_to_pool(self, connection, pool, **kwargs):
+    async def release_to_pool(
+        self, connection: ConnT, pool: PoolT, **kwargs,
+    ):
         pass
 
     @abstractmethod
-    async def _is_master(self, connection):
+    async def _is_master(self, connection: ConnT) -> bool:
         pass
 
     @abstractmethod
-    async def _pool_factory(self, dsn: Dsn):
+    async def _pool_factory(self, dsn: Dsn) -> PoolT:
         pass
 
     @abstractmethod
-    async def _close(self, pool):
+    async def _close(self, pool: PoolT):
         pass
 
     @abstractmethod
-    async def _terminate(self, pool) -> None:
+    async def _terminate(self, pool: PoolT) -> None:
         pass
 
     @abstractmethod
-    def is_connection_closed(self, connection):
+    def is_connection_closed(self, connection: ConnT) -> bool:
         pass
 
     @abstractmethod
-    def host(self, pool: Any):
+    def host(self, pool: PoolT) -> str:
         pass
 
     @abstractmethod
@@ -327,7 +353,7 @@ class BasePoolManager(ABC):
         master_as_replica_weight: Optional[float] = None,
         timeout: Optional[float] = None,
         **kwargs,
-    ):
+    ) -> "PoolAcquireContext[PoolT, ConnT]":
         if fallback_master is None:
             fallback_master = self._fallback_master
 
@@ -367,7 +393,7 @@ class BasePoolManager(ABC):
         self,
         timeout: Optional[float] = None,
         **kwargs,
-    ):
+    ) -> "PoolAcquireContext[PoolT, ConnT]":
         return self.acquire(read_only=False, timeout=timeout, **kwargs)
 
     def acquire_replica(
@@ -376,7 +402,7 @@ class BasePoolManager(ABC):
         master_as_replica_weight: Optional[float] = None,
         timeout: Optional[float] = None,
         **kwargs,
-    ):
+    ) -> "PoolAcquireContext[PoolT, ConnT]":
         return self.acquire(
             read_only=True,
             fallback_master=fallback_master,
@@ -385,7 +411,7 @@ class BasePoolManager(ABC):
             **kwargs,
         )
 
-    async def release(self, connection, **kwargs):
+    async def release(self, connection: ConnT, **kwargs):
         if connection not in self._unmanaged_connections:
             raise ValueError(
                 "Pool.release() received invalid connection: "
@@ -478,13 +504,15 @@ class BasePoolManager(ABC):
         async with self._replica_cond:
             await self._replica_cond.wait_for(predicate)
 
-    async def get_master_pools(self) -> List:
+    async def get_master_pools(self) -> List[PoolT]:
         if not self._master_pool_set:
             async with self._master_cond:
                 await self._master_cond.wait()
         return list(self._master_pool_set)
 
-    async def get_replica_pools(self, fallback_master: bool = False) -> List:
+    async def get_replica_pools(
+        self, fallback_master: bool = False,
+    ) -> List[PoolT]:
         if not self._replica_pool_set:
             if fallback_master:
                 return await self.get_master_pools()
@@ -492,16 +520,16 @@ class BasePoolManager(ABC):
                 await self._replica_cond.wait()
         return list(self._replica_pool_set)
 
-    def pool_is_master(self, pool) -> bool:
+    def pool_is_master(self, pool: PoolT) -> bool:
         return pool in self._master_pool_set
 
-    def pool_is_replica(self, pool) -> bool:
+    def pool_is_replica(self, pool: PoolT) -> bool:
         return pool in self._replica_pool_set
 
-    def register_connection(self, connection, pool):
+    def register_connection(self, connection: ConnT, pool: PoolT):
         self._unmanaged_connections[connection] = pool
 
-    def get_last_response_time(self, pool) -> Optional[float]:
+    def get_last_response_time(self, pool: PoolT) -> Optional[float]:
         return self._stopwatch.get_time(pool)
 
     def _prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
@@ -535,10 +563,11 @@ class BasePoolManager(ABC):
         dsn = self._dsn[index]
         censored_dsn = str(dsn.with_(password="******"))
         pool = await self._wait_creating_pool(dsn)
+        assert pool is not None
         self._pools[index] = pool
 
         logger.debug("Setting dsn=%r event", censored_dsn)
-        sys_connection = None
+        sys_connection: Optional[ConnT] = None
         while not self._closing:
             try:
                 # Не использовать async with self.acquire_from_pool(pool)
@@ -553,6 +582,7 @@ class BasePoolManager(ABC):
                 )
 
                 logger.debug("Checking dsn=%r", censored_dsn)
+                assert sys_connection is not None
                 await self._periodic_pool_check(pool, dsn, sys_connection)
             except asyncio.TimeoutError:
                 logger.warning(
@@ -619,7 +649,9 @@ class BasePoolManager(ABC):
                 )
                 await asyncio.sleep(self._refresh_delay)
 
-    async def _periodic_pool_check(self, pool, dsn: Dsn, sys_connection):
+    async def _periodic_pool_check(
+        self, pool: PoolT, dsn: Dsn, sys_connection: ConnT,
+    ):
         while not self._closing:
             try:
                 await asyncio.wait_for(
@@ -642,7 +674,7 @@ class BasePoolManager(ABC):
         async with self._dsn_check_cond[dsn]:
             self._dsn_check_cond[dsn].notify_all()
 
-    async def _add_pool_to_master_set(self, pool, dsn: Dsn):
+    async def _add_pool_to_master_set(self, pool: PoolT, dsn: Dsn):
         if pool in self._master_pool_set:
             return
         self._master_pool_set.add(pool)
@@ -653,7 +685,7 @@ class BasePoolManager(ABC):
         async with self._master_cond:
             self._master_cond.notify_all()
 
-    async def _add_pool_to_replica_set(self, pool, dsn: Dsn):
+    async def _add_pool_to_replica_set(self, pool: PoolT, dsn: Dsn):
         if pool in self._replica_pool_set:
             return
         self._replica_pool_set.add(pool)
@@ -664,7 +696,7 @@ class BasePoolManager(ABC):
         async with self._replica_cond:
             self._replica_cond.notify_all()
 
-    def _remove_pool_from_master_set(self, pool, dsn: Dsn):
+    def _remove_pool_from_master_set(self, pool: PoolT, dsn: Dsn):
         if pool in self._master_pool_set:
             self._master_pool_set.remove(pool)
             logger.debug(
@@ -672,7 +704,7 @@ class BasePoolManager(ABC):
                 dsn.with_(password="******"),
             )
 
-    def _remove_pool_from_replica_set(self, pool, dsn: Dsn):
+    def _remove_pool_from_replica_set(self, pool: PoolT, dsn: Dsn):
         if pool in self._replica_pool_set:
             self._replica_pool_set.remove(pool)
             logger.debug(
@@ -680,7 +712,9 @@ class BasePoolManager(ABC):
                 dsn.with_(password="******"),
             )
 
-    async def _refresh_pool_role(self, pool, dsn: Dsn, sys_connection):
+    async def _refresh_pool_role(
+        self, pool: PoolT, dsn: Dsn, sys_connection: ConnT,
+    ):
         with self._stopwatch(pool):
             is_master = await self._is_master(sys_connection)
         if is_master:
@@ -703,7 +737,10 @@ class BasePoolManager(ABC):
 
 
 __all__ = (
+    "AcquireContext",
     "BasePoolManager",
     "AbstractBalancerPolicy",
     "TimeoutAcquireContext",
+    "PoolT",
+    "ConnT",
 )

@@ -15,7 +15,7 @@ class PoolManager(AioPgPoolManager):
         read_only = await connection.scalar("SHOW transaction_read_only")
         return read_only == "off"
 
-    async def _pool_factory(self, dsn: Dsn) -> aiopg.sa.Engine:
+    async def _pool_factory(self, dsn: Dsn) -> aiopg.sa.Engine:  # type: ignore[override]
         return await aiopg.sa.create_engine(
             str(dsn),
             **self.pool_factory_kwargs,

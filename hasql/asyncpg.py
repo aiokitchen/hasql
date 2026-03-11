@@ -1,7 +1,7 @@
 import asyncio
 from typing import ClassVar, Dict, Sequence
 
-import asyncpg  # type: ignore
+import asyncpg  # type: ignore[import-untyped]
 from packaging.version import parse as parse_version
 
 from hasql.base import BasePoolManager
@@ -9,8 +9,7 @@ from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
-class PoolManager(BasePoolManager):
-    pools: Sequence[asyncpg.Pool]
+class PoolManager(BasePoolManager[asyncpg.Pool, asyncpg.Connection]):
     cached_hosts: ClassVar[Dict[int, str]] = {}
 
     def _prepare_acquire_kwargs(
@@ -59,14 +58,14 @@ class PoolManager(BasePoolManager):
         # linked to a pool.
         def host(self, pool: asyncpg.Pool):
             conn = next(
-                (holder._con for holder in pool._holders if holder._con),
-                None
+                (holder._con for holder in pool._holders if holder._con), None
             )
             if conn is not None:
                 addr, _ = conn._addr
                 PoolManager.cached_hosts[id(pool)] = addr
             return PoolManager.cached_hosts[id(pool)]
     else:
+
         def host(self, pool: asyncpg.Pool):
             addr, _ = pool._working_addr
             return addr

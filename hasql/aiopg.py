@@ -8,8 +8,7 @@ from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
-class PoolManager(BasePoolManager):
-    pools: Sequence[aiopg.Pool]
+class PoolManager(BasePoolManager[aiopg.Pool, aiopg.Connection]):
 
     # TODO: _timeout is a smuggled kwarg key — consider returning a
     #  (kwargs, timeout) tuple from _prepare_acquire_kwargs instead.

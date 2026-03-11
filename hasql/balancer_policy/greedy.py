@@ -1,15 +1,16 @@
 import random
 
 from hasql.balancer_policy.base import BaseBalancerPolicy
+from hasql.base import PoolT
 
 
-class GreedyBalancerPolicy(BaseBalancerPolicy):
+class GreedyBalancerPolicy(BaseBalancerPolicy[PoolT]):
     async def _get_pool(
         self,
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ):
+    ) -> PoolT:
         candidates = []
 
         if read_only:

@@ -31,6 +31,18 @@ class SlowAcquire:
         return self.wait().__await__()
 
 
+class _TimeoutSlowAcquire:
+    def __init__(self, slow_acquire: SlowAcquire, timeout: float):
+        self._slow_acquire = slow_acquire
+        self._timeout = timeout
+
+    def __await__(self):
+        return asyncio.wait_for(
+            self._slow_acquire.wait(),
+            timeout=self._timeout,
+        ).__await__()
+
+
 class RecordingPoolManager:
     def __init__(self, pool_delay: float, acquire_delay: float):
         self.pool = object()
@@ -45,7 +57,11 @@ class RecordingPoolManager:
 
     def acquire_from_pool(self, pool, **kwargs):
         self.acquire_kwargs = kwargs
-        return SlowAcquire(self.acquire_delay)
+        timeout = kwargs.get("timeout")
+        slow = SlowAcquire(self.acquire_delay)
+        if timeout is not None:
+            return _TimeoutSlowAcquire(slow, timeout)
+        return slow
 
     def host(self, pool):
         return "test-host:5432"

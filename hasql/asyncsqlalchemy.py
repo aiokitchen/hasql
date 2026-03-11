@@ -7,18 +7,31 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import QueuePool
 
-from hasql.base import BasePoolManager
+from hasql.base import BasePoolManager, TimeoutAcquireContext
 from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
+    def _prepare_acquire_kwargs(
+        self,
+        kwargs: dict,
+        timeout: Optional[float],
+    ) -> dict:
+        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
+        prepared_kwargs["_timeout"] = timeout
+        return prepared_kwargs
+
     def get_pool_freesize(self, pool: AsyncEngine):
         queue_pool: QueuePool = pool.sync_engine.pool
         return queue_pool.size() - queue_pool.checkedout()
 
     def acquire_from_pool(self, pool: AsyncEngine, **kwargs):
-        return pool.connect()
+        timeout = kwargs.pop("_timeout", None)
+        ctx = pool.connect()
+        if timeout is not None:
+            return TimeoutAcquireContext(ctx, timeout)
+        return ctx
 
     async def release_to_pool(      # type: ignore
         self,

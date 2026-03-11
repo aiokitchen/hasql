@@ -12,6 +12,29 @@ from .utils import Dsn, Stopwatch, split_dsn
 
 logger = logging.getLogger(__name__)
 
+
+class TimeoutAcquireContext:
+    __slots__ = ("_context", "_timeout")
+
+    def __init__(self, context, timeout: float):
+        self._context = context
+        self._timeout = timeout
+
+    async def __aenter__(self):
+        return await asyncio.wait_for(
+            self._context.__aenter__(),
+            timeout=self._timeout,
+        )
+
+    async def __aexit__(self, *exc):
+        await self._context.__aexit__(*exc)
+
+    def __await__(self):
+        return asyncio.wait_for(
+            self._context.__aenter__(),
+            timeout=self._timeout,
+        ).__await__()
+
 DEFAULT_REFRESH_DELAY: int = 1
 DEFAULT_REFRESH_TIMEOUT: int = 30
 DEFAULT_ACQUIRE_TIMEOUT: float = 1.0
@@ -96,11 +119,8 @@ class PoolAcquireContext(AsyncContextManager):
         acquire_kwargs = self._acquire_kwargs(deadline)
 
         with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
-            self.conn = await asyncio.wait_for(
-                self.pool_manager.acquire_from_pool(
-                    self.pool, **acquire_kwargs,
-                ),
-                timeout=self._remaining_timeout(deadline),
+            self.conn = await self.pool_manager.acquire_from_pool(
+                self.pool, **acquire_kwargs,
             )
 
         self.metrics.add_connection(self.pool_manager.host(self.pool))
@@ -117,10 +137,7 @@ class PoolAcquireContext(AsyncContextManager):
                 self.pool,
                 **acquire_kwargs,
             )
-            self.conn = await asyncio.wait_for(
-                self.context.__aenter__(),
-                timeout=self._remaining_timeout(deadline),
-            )
+            self.conn = await self.context.__aenter__()
 
         self.metrics.add_connection(self.pool_manager.host(self.pool))
         return self.conn
@@ -668,4 +685,8 @@ class BasePoolManager(ABC):
         await self.close()
 
 
-__all__ = ("BasePoolManager", "AbstractBalancerPolicy")
+__all__ = (
+    "BasePoolManager",
+    "AbstractBalancerPolicy",
+    "TimeoutAcquireContext",
+)

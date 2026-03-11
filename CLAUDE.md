@@ -7,44 +7,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Testing:**
 ```bash
 # Run all tests
-pytest -vv --cov=hasql --cov-report=term-missing --doctest-modules --aiomisc-test-timeout=30 tests
+uv run pytest -vv --cov=hasql --cov-report=term-missing --doctest-modules --aiomisc-test-timeout=30 tests
 
 # Run specific test file
-pytest -vv tests/test_utils.py
+uv run pytest -vv tests/test_utils.py
 
 # Run specific test
-pytest -vv tests/test_utils.py::test_parse_connection_string_basic
+uv run pytest -vv tests/test_utils.py::test_parse_connection_string_basic
 
 # Run tests with specific pattern
-pytest -vv tests/test_utils.py -k "connection_string"
+uv run pytest -vv tests/test_utils.py -k "connection_string"
 
 # Run tests using tox (preferred)
-tox -e py310 # Python 3.10
-tox -e py311 # Python 3.11
+uv run tox -e py310 # Python 3.10
+uv run tox -e py311 # Python 3.11
 ```
 
 **Linting and Type Checking:**
 ```bash
 # Lint code
-pylama -o pylama.ini hasql tests
+uv run ruff check hasql tests
 
 # Type checking
-mypy --install-types --non-interactive hasql tests
+uv run mypy --install-types --non-interactive hasql tests
 
 # Using tox (preferred)
-tox -e lint
-tox -e mypy
+uv run tox -e lint
+uv run tox -e mypy
 ```
 
 **Package Installation:**
 ```bash
 # Install development dependencies
-pip install -e ".[develop]"
+uv sync --group develop
 
-# Install specific extras
-pip install -e ".[aiopg]"      # aiopg support
-pip install -e ".[asyncpg]"    # asyncpg support
-pip install -e ".[psycopg]"    # psycopg3 support
+# Install specific driver groups
+uv sync --group aiopg       # aiopg support
+uv sync --group asyncpg     # asyncpg support
+uv sync --group psycopg     # psycopg3 support
 ```
 
 ## Architecture Overview
@@ -101,7 +101,7 @@ pip install -e ".[psycopg]"    # psycopg3 support
 
 ## Important Notes
 
-- The codebase uses Python 3.8+ with async/await throughout
+- The codebase uses Python 3.10+ with async/await throughout
 - All pool managers extend the abstract `BasePoolManager` class
 - Connection strings support both single and multi-host PostgreSQL URLs
 - Background health checking runs every `refresh_delay` seconds (default: 1s)

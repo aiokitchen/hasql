@@ -26,7 +26,7 @@ pool_manager.acquire_master(timeout=5.0)
 pool_manager.acquire_replica(timeout=5.0)
 ```
 
-Setting `timeout=None` means no timeout (wait indefinitely).
+Setting `timeout=None` (the default) uses the manager-level `acquire_timeout`.
 
 ## Per-driver behavior
 
@@ -43,6 +43,10 @@ using the most appropriate mechanism:
 `_prepare_acquire_kwargs` sets `timeout=<remaining>`, which is passed to
 `pool.getconn(timeout=...)`. psycopg3 raises `psycopg_pool.PoolTimeout`
 natively.
+
+> **Breaking (0.9.0):** Previous versions forced `max_waiting=-1` (unlimited
+> queue) on psycopg3 pools. This override has been removed. If you relied on
+> unlimited waiting, pass `pool_factory_kwargs={"max_waiting": -1}` explicitly.
 
 ### aiopg / aiopg_sa
 

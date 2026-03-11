@@ -36,6 +36,10 @@ class TimeoutAcquireContext:
         )
 
     async def __aexit__(self, *exc):
+        # TODO: consider adding a bounded timeout here. Currently if the
+        #  underlying driver hangs during connection release this will block
+        #  indefinitely. A timeout risks leaking the connection (not returned
+        #  to pool), so this needs careful design.
         await self._context.__aexit__(*exc)
 
     def __await__(self):
@@ -96,6 +100,9 @@ class PoolAcquireContext(AsyncContextManager):
             raise asyncio.TimeoutError
         return remaining_timeout
 
+    # TODO: make _get_pool a clean function (return pool without mutating
+    #  self.pool) and extract the shared preamble between __aenter__ /
+    #  acquire_from_pool_connection into a helper.
     async def _get_pool(self, deadline: float):
         async def get_pool() -> Any:
             with self.metrics.with_get_pool():
@@ -117,10 +124,13 @@ class PoolAcquireContext(AsyncContextManager):
             timeout=self._remaining_timeout(deadline),
         )
 
-    async def acquire_from_pool_connection(self):
+    async def _resolve_pool_and_kwargs(self):
         deadline = self._deadline()
         await self._get_pool(deadline)
-        acquire_kwargs = self._acquire_kwargs(deadline)
+        return self._acquire_kwargs(deadline)
+
+    async def acquire_from_pool_connection(self):
+        acquire_kwargs = await self._resolve_pool_and_kwargs()
 
         with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
             self.conn = await self.pool_manager.acquire_from_pool(
@@ -133,9 +143,7 @@ class PoolAcquireContext(AsyncContextManager):
         return self.conn
 
     async def __aenter__(self):
-        deadline = self._deadline()
-        await self._get_pool(deadline)
-        acquire_kwargs = self._acquire_kwargs(deadline)
+        acquire_kwargs = await self._resolve_pool_and_kwargs()
 
         with self.metrics.with_acquire(self.pool_manager.host(self.pool)):
             self.context = self.pool_manager.acquire_from_pool(

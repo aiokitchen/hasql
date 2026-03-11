@@ -13,6 +13,8 @@ from hasql.utils import Dsn
 
 
 class PoolManager(BasePoolManager):
+    # TODO: _timeout is a smuggled kwarg key — consider returning a
+    #  (kwargs, timeout) tuple from _prepare_acquire_kwargs instead.
     def _prepare_acquire_kwargs(
         self,
         kwargs: dict,

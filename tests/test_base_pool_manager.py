@@ -268,5 +268,174 @@ async def test_check_pool_canceled_error_while_releasing_connection(
             )
         )
         await asyncio.sleep(1)
-        for task in pool_manager._refresh_role_tasks:
+        for task in pool_manager._health.tasks:
             assert not task.done()
+
+
+def test_invalid_balancer_policy():
+    with pytest.raises(ValueError, match="balancer_policy"):
+        TestPoolManager(
+            dsn="postgresql://test:test@master/test",
+            balancer_policy=str,
+        )
+
+
+async def test_release_unknown_connection(pool_manager: BasePoolManager):
+    await pool_manager.ready()
+    fake_conn = object()
+    with pytest.raises(ValueError, match="is not a member of this pool"):
+        await pool_manager.release(fake_conn)
+
+
+async def test_acquire_master_as_replica_weight_write_raises(
+    pool_manager: BasePoolManager,
+):
+    await pool_manager.ready()
+    with pytest.raises(ValueError, match="master_as_replica_weight"):
+        pool_manager.acquire(read_only=False, master_as_replica_weight=0.5)
+
+
+@pytest.mark.parametrize("weight", [-0.1, 1.1, 2.0])
+async def test_acquire_master_as_replica_weight_out_of_range(
+    pool_manager: BasePoolManager,
+    weight: float,
+):
+    await pool_manager.ready()
+    with pytest.raises(ValueError, match="segment"):
+        pool_manager.acquire(read_only=True, master_as_replica_weight=weight)
+
+
+async def test_properties(pool_manager: BasePoolManager):
+    await pool_manager.ready()
+    assert pool_manager.refresh_delay == 0.1
+    assert pool_manager.refresh_timeout == 0.2
+    assert pool_manager.pool_factory_kwargs is not None
+    assert pool_manager.closing is False
+    assert pool_manager.closed is False
+
+
+async def test_metrics_after_acquire(pool_manager: BasePoolManager):
+    await pool_manager.ready()
+    conn = await pool_manager.acquire_master()
+    from hasql.metrics import Metrics
+    m = pool_manager.metrics()
+    assert isinstance(m, Metrics)
+    assert m.hasql.pool == 1
+    assert m.hasql.add_connections.get("test-host:5432") == 1
+    await pool_manager.release(conn)
+
+
+async def test_aenter_aexit(dsn):
+    async with TestPoolManager(
+        dsn, refresh_timeout=0.2, refresh_delay=0.1,
+    ) as pm:
+        assert pm.master_pool_count > 0
+    assert pm.closed
+
+
+async def test_terminate_skips_none_pools(pool_manager: BasePoolManager):
+    await pool_manager.ready()
+    # Force a None entry into the pools list
+    pool_manager._pools.append(None)
+    await pool_manager.terminate()
+    assert pool_manager.closed
+
+
+async def test_close_releases_unmanaged_connections(
+    pool_manager: BasePoolManager,
+):
+    await pool_manager.ready()
+    conn = await pool_manager.acquire_master()
+    assert conn in pool_manager._unmanaged_connections
+    await pool_manager.close()
+    assert pool_manager.closed
+    assert len(pool_manager._unmanaged_connections) == 0
+
+
+async def test_check_pool_task_cancelled_error_non_closing():
+    """CancelledError during _is_master when not closing removes pool."""
+    pool_manager = TestPoolManager(
+        "postgresql://test:test@master/test",
+        refresh_timeout=0.2,
+        refresh_delay=0.05,
+    )
+    try:
+        await pool_manager.ready()
+        assert pool_manager.master_pool_count == 1
+
+        with patch.object(
+            pool_manager,
+            '_is_master',
+            AsyncMock(side_effect=asyncio.CancelledError()),
+        ):
+            await pool_manager.wait_next_pool_check()
+            assert pool_manager.master_pool_count == 0
+
+        # Recovers after the patch is removed
+        await pool_manager.wait_next_pool_check()
+        assert pool_manager.master_pool_count == 1
+    finally:
+        await pool_manager.close()
+
+
+async def test_wait_creating_pool_retries_on_failure():
+    """_wait_creating_pool retries when _pool_factory raises."""
+    call_count = 0
+    original_pool_factory = TestPoolManager._pool_factory
+
+    async def failing_factory(self, dsn):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise ConnectionError("cannot connect")
+        return await original_pool_factory(self, dsn)
+
+    with patch.object(
+        TestPoolManager, '_pool_factory', failing_factory,
+    ):
+        pm = TestPoolManager(
+            "postgresql://test:test@master/test",
+            refresh_timeout=0.2,
+            refresh_delay=0.05,
+        )
+        try:
+            await pm.ready(timeout=5)
+            assert call_count >= 3
+            assert pm.master_pool_count == 1
+        finally:
+            await pm.close()
+
+
+async def test_check_pool_task_release_exception():
+    """Exception during release_to_pool in _check_pool_task is handled."""
+    pool_manager = TestPoolManager(
+        "postgresql://test:test@master/test",
+        refresh_timeout=0.2,
+        refresh_delay=0.05,
+    )
+    try:
+        await pool_manager.ready()
+        assert pool_manager.master_pool_count == 1
+
+        master_pool = (await pool_manager.get_master_pools())[0]
+
+        with ExitStack() as stack:
+            for conn in master_pool.connections:
+                stack.enter_context(
+                    patch.object(
+                        conn, 'is_master',
+                        AsyncMock(side_effect=Exception("db error")),
+                    )
+                )
+            stack.enter_context(
+                patch.object(
+                    master_pool, 'release',
+                    AsyncMock(side_effect=RuntimeError("release failed")),
+                )
+            )
+            await asyncio.sleep(0.5)
+            # Tasks should still be running despite release errors
+            for task in pool_manager._health.tasks:
+                assert not task.done()
+    finally:
+        await pool_manager.close()

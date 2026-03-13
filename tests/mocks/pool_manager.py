@@ -1,8 +1,9 @@
 import asyncio
-from typing import Any, Sequence
+from typing import Optional, Sequence
 
 import mock
 
+from hasql.abc import PoolDriver
 from hasql.base import BasePoolManager
 from hasql.metrics import DriverMetrics
 from hasql.utils import Dsn
@@ -99,42 +100,46 @@ class TestPool:
             conn.terminate()
 
 
-class TestPoolManager(BasePoolManager):
+class TestDriver(PoolDriver[TestPool, TestConnection]):
     def get_pool_freesize(self, pool: TestPool):
         return pool.freesize
 
-    def acquire_from_pool(self, pool: TestPool, **kwargs):
+    def acquire_from_pool(self, pool: TestPool, *, timeout=None, **kwargs):
         return pool.acquire(**kwargs)
 
     async def release_to_pool(
-        self, connection: TestConnection, pool: TestPool, **kwargs
+        self, connection: TestConnection, pool: TestPool, **kwargs,
     ):
         await pool.release(connection, **kwargs)
 
-    async def _is_master(self, connection: TestConnection):
+    async def is_master(self, connection: TestConnection):
         return await connection.is_master()
 
-    async def _pool_factory(self, dsn: Dsn):
+    async def pool_factory(self, dsn: Dsn, **kwargs):
         return TestPool(str(dsn))
 
-    async def _close(self, pool: TestPool):
+    async def close_pool(self, pool: TestPool):
         await pool.close()
 
-    async def _terminate(self, pool: TestPool):
+    async def terminate_pool(self, pool: TestPool):
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, pool.terminate)
 
     def is_connection_closed(self, connection: TestConnection):
         return connection.is_closed
 
-    def metrics(self) -> Sequence[DriverMetrics]:
-        return []
-
-    def host(self, pool: Any):
+    def host(self, pool: TestPool):
         return "test-host:5432"
 
-    def _driver_metrics(self) -> Sequence[DriverMetrics]:
+    def driver_metrics(
+        self, pools: Sequence[Optional[TestPool]],
+    ) -> Sequence[DriverMetrics]:
         return []
 
 
-__all__ = ("TestPoolManager",)
+class TestPoolManager(BasePoolManager[TestPool, TestConnection]):
+    def __init__(self, dsn, **kwargs):
+        super().__init__(dsn, driver=TestDriver(), **kwargs)
+
+
+__all__ = ("TestDriver", "TestPoolManager")

@@ -2,7 +2,7 @@ import mock
 import pytest
 from aiopg.sa import SAConnection
 
-from hasql.aiopg_sa import PoolManager
+from hasql.driver.aiopg_sa import PoolManager
 from hasql.metrics import DriverMetrics
 
 

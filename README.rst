@@ -319,13 +319,175 @@ broken (the details of implementing PostgreSQL).
 If there are no available hosts, the methods acquire(), acquire_master(), and
 acquire_replica() wait until the host with the desired role startup.
 
+Balancer Policies
+*****************
+
+When multiple pools match the requested role (e.g. several healthy replicas),
+hasql uses a balancer policy to choose which pool to acquire a connection from.
+The policy is set via the ``balancer_policy`` parameter of ``PoolManager``.
+
+``GreedyBalancerPolicy`` (default)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Picks the pool with the most free connections. When several pools are tied,
+chooses randomly among them.
+
+Best for workloads where you want to fill up idle pools first and avoid
+acquiring from pools that are already under pressure.
+
+``RoundRobinBalancerPolicy``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cycles through available pools in order, giving each pool an equal share
+of requests regardless of pool state or host performance.
+
+Best for uniform workloads where all replicas have similar hardware and
+you want simple, predictable distribution.
+
+``RandomWeightedBalancerPolicy``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Selects a pool randomly with probability proportional to response time —
+faster hosts get more connections, slower hosts get fewer, but no host is
+completely starved.
+
+Best for heterogeneous clusters where replicas differ in hardware, network
+latency, or current load. Unlike Greedy, it avoids thundering herd problems
+by distributing requests probabilistically instead of always picking the
+single "best" pool.
+
+.. list-table:: Policy Comparison
+   :header-rows: 1
+   :widths: 25 25 25 25
+
+   * - Property
+     - Greedy
+     - RoundRobin
+     - RandomWeighted
+   * - Selection strategy
+     - Most free connections
+     - Sequential rotation
+     - Weighted by response time
+   * - Adapts to load
+     - Yes (pool state)
+     - No
+     - Yes (latency)
+   * - Thundering herd risk
+     - Higher
+     - None
+     - None
+   * - Heterogeneous replicas
+     - Poor
+     - Poor
+     - Good
+   * - Predictability
+     - Low
+     - High
+     - Medium
+   * - Best for
+     - Low-concurrency
+     - Uniform clusters
+     - Mixed hardware
+
+.. code-block:: python
+
+    from hasql.balancer_policy import (
+        GreedyBalancerPolicy,
+        RandomWeightedBalancerPolicy,
+        RoundRobinBalancerPolicy,
+    )
+    from hasql.asyncpg import PoolManager
+
+    pool = PoolManager(
+        dsn,
+        balancer_policy=RandomWeightedBalancerPolicy,
+    )
+
+Architecture
+============
+
+hasql uses a composition-based architecture. Pool orchestration logic lives in
+``BasePoolManager``, while all driver-specific operations (creating pools,
+acquiring/releasing connections, checking master status) are encapsulated in
+``PoolDriver`` implementations.
+
+.. code-block::
+
+    PoolDriver (ABC)                    <- driver interface (10 methods)
+      ├── AiopgDriver
+      │     └── AiopgSaDriver
+      ├── AsyncpgDriver
+      │     └── AsyncpgsaDriver
+      ├── Psycopg3Driver
+      └── AsyncSqlAlchemyDriver
+
+    BasePoolManager (concrete)          <- has-a PoolDriver
+      └── driver-specific PoolManager   <- thin wrapper: creates driver
+
+Each driver-specific ``PoolManager`` (e.g. ``hasql.aiopg.PoolManager``) is a
+thin subclass that passes the appropriate ``PoolDriver`` instance to
+``BasePoolManager``:
+
+.. code-block:: python
+
+    from hasql.aiopg import PoolManager
+
+    # PoolManager internally creates AiopgDriver and passes it
+    # to BasePoolManager — no need to interact with PoolDriver directly
+    pool = PoolManager("postgresql://master,replica/db")
+
+Custom drivers
+~~~~~~~~~~~~~~
+
+You can implement a custom driver by subclassing ``PoolDriver``:
+
+.. code-block:: python
+
+    from hasql.abc import PoolDriver
+    from hasql.pool_manager import BasePoolManager
+
+    class MyDriver(PoolDriver[MyPool, MyConnection]):
+        # implement all abstract methods ...
+        ...
+
+    pool = BasePoolManager(
+        "postgresql://master,replica/db",
+        driver=MyDriver(),
+    )
+
 Overview
 ========
 
-* hasql.base.BasePoolManager
-    * ``__init__(dsn, acquire_timeout, refresh_delay, refresh_timeout, fallback_master, master_as_replica_weight, balancer_policy, pool_factory_kwargs)``:
+* hasql.abc.PoolDriver
+    Abstract base class for database driver implementations.
+    Each driver must implement:
+
+    * ``get_pool_freesize(pool)`` - Return number of free connections
+    * ``acquire_from_pool(pool, *, timeout, **kwargs)`` - Acquire a
+      connection
+    * ``release_to_pool(connection, pool, **kwargs)`` - Release a
+      connection
+    * ``is_master(connection)`` - Check if connection is to master
+    * ``pool_factory(dsn, **kwargs)`` - Create a connection pool
+    * ``close_pool(pool)`` - Gracefully close a pool
+    * ``terminate_pool(pool)`` - Forcefully terminate a pool
+    * ``is_connection_closed(connection)`` - Check if connection is closed
+    * ``host(pool)`` - Return host address for a pool
+    * ``driver_metrics(pools)`` - Return driver-level metrics
+
+    Optional override:
+
+    * ``prepare_pool_factory_kwargs(kwargs)`` - Adjust pool factory kwargs
+      (e.g. to reserve a system connection by incrementing min/max size)
+
+* hasql.pool_manager.BasePoolManager
+    * ``__init__(dsn, *, driver, acquire_timeout, refresh_delay, refresh_timeout, fallback_master, master_as_replica_weight, balancer_policy, pool_factory_kwargs)``:
 
         * ``dsn: str`` - Connection string used by the connection.
+
+        * ``driver: PoolDriver`` - Driver instance that implements
+          database-specific pool operations. Driver-specific
+          ``PoolManager`` classes provide this automatically.
 
         * ``acquire_timeout: Union[int, float]`` - Default timeout (in seconds)
           for connection operations. 1 sec by default.
@@ -354,6 +516,9 @@ Overview
         * ``pool_factory_kwargs: Optional[dict]`` - Connection pool creation
           parameters that are passed to pool factory.
 
+    * ``driver`` - Property that returns the ``PoolDriver`` instance
+      used by this pool manager.
+
     * ``get_pool_freesize(pool)``
       Getting the number of free connections in the connection pool. Returns
       number of free connections in the connection pool.
@@ -361,10 +526,13 @@ Overview
         * ``pool`` - Pool for which you to be getting the number of
           free connections.
 
-    * coroutine async-with ``acquire_from_pool(pool, **kwargs)``
+    * coroutine async-with ``acquire_from_pool(pool, *, timeout, **kwargs)``
       Acquire a connection from pool. Returns connection to the database.
 
         * ``pool`` - Pool from which you to be acquiring the connection.
+
+        * ``timeout: Optional[float]`` - Timeout (in seconds) for
+          the acquire operation. None by default.
 
         * ``kwargs`` - Arguments to be passed to the pool acquire() method.
 
@@ -502,15 +670,17 @@ Overview
       Match connection with the pool from which it was taken.
       It is necessary for the release() method to work correctly.
 
-* ``hasql.aiopg.PoolManager``
+* ``hasql.aiopg.PoolManager`` (driver: ``AiopgDriver``)
 
-* ``hasql.aiopg_sa.PoolManager``
+* ``hasql.aiopg_sa.PoolManager`` (driver: ``AiopgSaDriver``)
 
-* ``hasql.asyncpg.PoolManager``
+* ``hasql.asyncpg.PoolManager`` (driver: ``AsyncpgDriver``)
 
-* ``hasql.asyncpgsa.PoolManager``
+* ``hasql.asyncpgsa.PoolManager`` (driver: ``AsyncpgsaDriver``)
 
-* ``hasql.psycopg3.PoolManager``
+* ``hasql.asyncsqlalchemy.PoolManager`` (driver: ``AsyncSqlAlchemyDriver``)
+
+* ``hasql.psycopg3.PoolManager`` (driver: ``Psycopg3Driver``)
 
 Balancer policies
 =================

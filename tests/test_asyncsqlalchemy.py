@@ -5,19 +5,30 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
-from hasql.asyncsqlalchemy import PoolManager, async_sessionmaker
+from hasql.driver.asyncsqlalchemy import PoolManager, async_sessionmaker
 from hasql.metrics import DriverMetrics
 
 
-def test_prepare_acquire_kwargs_sets_timeout():
+def test_acquire_from_pool_wraps_with_timeout():
+    from hasql.base import TimeoutAcquireContext
+    from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
+
     pool_manager = PoolManager.__new__(PoolManager)
-    assert pool_manager._prepare_acquire_kwargs(
-        {"some_kwarg": 1},
-        timeout=0.25,
-    ) == {
-        "some_kwarg": 1,
-        "_timeout": 0.25,
-    }
+    pool_manager._driver = AsyncSqlAlchemyDriver()
+    pool = mock.MagicMock()
+    ctx = pool_manager.acquire_from_pool(pool, timeout=0.25)
+    assert isinstance(ctx, TimeoutAcquireContext)
+
+
+def test_acquire_from_pool_no_timeout():
+    from hasql.base import TimeoutAcquireContext
+    from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
+
+    pool_manager = PoolManager.__new__(PoolManager)
+    pool_manager._driver = AsyncSqlAlchemyDriver()
+    pool = mock.MagicMock()
+    ctx = pool_manager.acquire_from_pool(pool)
+    assert not isinstance(ctx, TimeoutAcquireContext)
 
 
 @pytest.fixture

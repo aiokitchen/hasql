@@ -45,7 +45,7 @@ async def test_catch_cancelled_error(pool_manager_factory, pg_dsn, name):
         await pool_manager.ready()
         assert pool_manager.available_pool_count > 0
         with mock.patch(
-            f"hasql.{name}.PoolManager._is_master",
+            f"hasql.driver.{name}.PoolManager._is_master",
             side_effect=asyncio.CancelledError(),
         ):
             await pool_manager.wait_next_pool_check()

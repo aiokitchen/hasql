@@ -1,12 +1,15 @@
 import random
-from abc import abstractmethod
-from typing import Any, Optional
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Generic, List, Optional, TypeVar
 
-from ..base import AbstractBalancerPolicy, BasePoolManager, PoolT
+if TYPE_CHECKING:
+    from ..pool_manager import BasePoolManager as _BasePoolManager
+
+PoolT = TypeVar("PoolT")
 
 
-class BaseBalancerPolicy(AbstractBalancerPolicy[PoolT]):
-    def __init__(self, pool_manager: BasePoolManager[PoolT, Any]):
+class AbstractBalancerPolicy(ABC, Generic[PoolT]):
+    def __init__(self, pool_manager: "_BasePoolManager[PoolT, Any]"):
         self._pool_manager = pool_manager
 
     async def get_pool(
@@ -14,7 +17,7 @@ class BaseBalancerPolicy(AbstractBalancerPolicy[PoolT]):
         read_only: bool,
         fallback_master: bool = False,
         master_as_replica_weight: Optional[float] = None,
-    ) -> PoolT:
+    ) -> Optional[PoolT]:
         if not read_only and master_as_replica_weight is not None:
             raise ValueError(
                 "Field master_as_replica_weight is used only when "
@@ -32,14 +35,40 @@ class BaseBalancerPolicy(AbstractBalancerPolicy[PoolT]):
             choose_master_as_replica=choose_master_as_replica,
         )
 
+    async def _get_candidates(
+        self,
+        read_only: bool,
+        fallback_master: bool = False,
+        choose_master_as_replica: bool = False,
+    ) -> List[PoolT]:
+        candidates: List[PoolT] = []
+
+        if read_only:
+            candidates.extend(
+                await self._pool_manager.get_replica_pools(
+                    fallback_master=fallback_master,
+                ),
+            )
+
+        if not read_only or (
+            choose_master_as_replica
+            and self._pool_manager.master_pool_count > 0
+        ):
+            candidates.extend(await self._pool_manager.get_master_pools())
+
+        return candidates
+
     @abstractmethod
     async def _get_pool(
         self,
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ) -> PoolT:
+    ) -> Optional[PoolT]:
         pass
 
 
-__all__ = ["BaseBalancerPolicy"]
+# Backward-compatible alias
+BaseBalancerPolicy = AbstractBalancerPolicy
+
+__all__ = ["AbstractBalancerPolicy", "BaseBalancerPolicy", "PoolT"]

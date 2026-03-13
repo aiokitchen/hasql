@@ -3,7 +3,6 @@ import pytest
 from aiopg import Connection
 
 from hasql.driver.aiopg import PoolManager
-from hasql.metrics import DriverMetrics
 
 
 @pytest.fixture
@@ -43,11 +42,11 @@ async def test_close(pool_manager):
 
 async def test_release(pool_manager):
     aiopg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.get_pool_freesize(aiopg_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
     conn = await pool_manager.acquire_master()
-    assert pool_manager.get_pool_freesize(aiopg_pool) == 9
+    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 9
     await pool_manager.release(conn)
-    assert pool_manager.get_pool_freesize(aiopg_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
@@ -59,16 +58,30 @@ async def test_is_connection_closed(pool_manager):
 
 async def test_driver_context_metrics(pool_manager, pg_dsn):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics().drivers == [
-            DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
-        ]
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 11
+        assert p.idle == 9
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1
 
 
 async def test_driver_metrics(pool_manager, pg_dsn):
     _ = await pool_manager.acquire_master()
-    assert pool_manager.metrics().drivers == [
-        DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
-    ]
+    pools = pool_manager.metrics().pools
+    assert len(pools) == 1
+    p = pools[0]
+    assert p.max == 11
+    assert p.min == 11
+    assert p.idle == 9
+    assert p.used == 2
+    assert p.role == "master"
+    assert p.healthy is True
+    assert p.in_flight == 1
 
 
 def test_acquire_from_pool_wraps_with_timeout():

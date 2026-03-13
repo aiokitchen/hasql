@@ -137,11 +137,14 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
             conn: ConnT = await driver_ctx.__aenter__()
 
         self.metrics.add_connection(self.pool_manager.host(pool))
+        self.pool_manager.register_connection(conn, pool)
         self._pool = pool
+        self._conn = conn
         self._context = driver_ctx
         return conn
 
     async def __aexit__(self, *exc):
+        self.pool_manager.unregister_connection(self._conn)
         self.metrics.remove_connection(
             self.pool_manager.host(self._pool),
         )

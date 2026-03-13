@@ -8,7 +8,6 @@ pytest.importorskip("psycopg_pool")
 from psycopg import AsyncConnection
 from psycopg_pool import PoolTimeout, TooManyRequests
 
-from hasql.metrics import DriverMetrics
 from hasql.driver.psycopg3 import PoolManager
 
 
@@ -26,7 +25,7 @@ async def pool_manager(pg_dsn, pool_size):
         pool_factory_kwargs={"min_size": pool_size, "max_size": pool_size},
     )
     try:
-        await pg_pool.ready()
+        await pg_pool.pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -56,11 +55,11 @@ async def test_close(pool_manager):
 
 async def test_release(pool_manager):
     aiopg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.get_pool_freesize(aiopg_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
     conn = await pool_manager.acquire_master()
-    assert pool_manager.get_pool_freesize(aiopg_pool) == 9
+    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 9
     await pool_manager.release(conn)
-    assert pool_manager.get_pool_freesize(aiopg_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
@@ -82,8 +81,8 @@ async def test_acquire_with_timeout_context(pool_manager, pool_size):
         await pool_manager.release(conn)
     conns.clear()
 
-    for pool in pool_manager.pools:
-        assert pool_manager.get_pool_freesize(pool) == pool_size
+    for pool in pool_manager.pool_state.pools:
+        assert pool_manager.pool_state.get_pool_freesize(pool) == pool_size
 
     for _ in range(pool_size):
         async with pool_manager.acquire_master() as conn:
@@ -103,7 +102,7 @@ async def queue_limited_pool_manager(pg_dsn, pool_size):
         },
     )
     try:
-        await pg_pool.ready()
+        await pg_pool.pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -144,6 +143,14 @@ def test_acquire_from_pool_passes_timeout():
 
 async def test_metrics(pool_manager):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics().drivers == [
-            DriverMetrics(max=11, min=11, idle=9, used=11, host=mock.ANY)
-        ]
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 11
+        assert p.idle == 9
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1
+        assert "pool_size" in p.extra

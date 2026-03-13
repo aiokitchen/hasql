@@ -1,10 +1,8 @@
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
-
-if TYPE_CHECKING:
-    from hasql.pool_manager import BasePoolManager
+from hasql.pool_state import PoolStateProvider
 
 
 class PoolOptions(NamedTuple):
@@ -13,8 +11,8 @@ class PoolOptions(NamedTuple):
 
 
 class RoundRobinBalancerPolicy(AbstractBalancerPolicy[PoolT]):
-    def __init__(self, pool_manager: "BasePoolManager[PoolT, Any]"):
-        super().__init__(pool_manager)
+    def __init__(self, pool_state: PoolStateProvider[PoolT]):
+        super().__init__(pool_state)
         self._indexes: defaultdict[PoolOptions, int] = defaultdict(lambda: 0)
 
     async def _get_pool(

@@ -35,24 +35,32 @@ uv run tox -e py311 # Python 3.11
 
 ### Core Components
 
-1. **BasePoolManager** (`hasql/base.py`) - Abstract base class that defines the core pooling interface and connection management logic
+1. **PoolState** (`hasql/pool_state.py`) - Manages pool state: master/replica sets, waiting/readiness, pool queries, and the stopwatch. Implements `PoolStateProvider` protocol used by balancer policies.
 
-2. **Driver-Specific Pool Managers:**
+2. **BasePoolManager** (`hasql/pool_manager.py`) - Thin orchestrator that composes `PoolState`, owns the driver, health monitor, balancer, metrics, and acquire/release logic. Pool state is accessed via the public `pool_state` attribute.
+
+3. **Driver-Specific Pool Managers:**
    - `hasql.aiopg.PoolManager` - aiopg driver support
    - `hasql.asyncpg.PoolManager` - asyncpg driver support
    - `hasql.psycopg3.PoolManager` - psycopg3 driver support
    - `hasql.asyncsqlalchemy.PoolManager` - SQLAlchemy async support
    - `hasql.aiopg_sa.PoolManager` - aiopg with SQLAlchemy support
 
-3. **Balancer Policies** (`hasql/balancer_policy/`) - Load balancing strategies (see details below)
+4. **Balancer Policies** (`hasql/balancer_policy/`) - Load balancing strategies (see details below)
 
-4. **Connection String Parsing** (`hasql/utils.py`) - Handles multi-host PostgreSQL connection strings with support for:
+5. **Connection String Parsing** (`hasql/utils.py`) - Handles multi-host PostgreSQL connection strings with support for:
    - Comma-separated hosts: `postgresql://db1,db2,db3/dbname`
    - Per-host ports: `postgresql://db1:1234,db2:5678/dbname`
    - Global port override: `postgresql://db1,db2:6432/dbname`
    - libpq-style connection strings
 
-5. **Metrics and Monitoring** (`hasql/metrics.py`) - Connection and performance metrics collection
+6. **Metrics and Monitoring** (`hasql/metrics.py`) - Three-layer metrics model:
+   - `PoolStats` — raw per-pool stats returned by `PoolDriver.pool_stats()` (min, max, idle, used, extra)
+   - `PoolMetrics` — enriched per-pool metrics built by `BasePoolManager.metrics()`, adding role, healthy, response_time, in_flight, and driver-specific extras
+   - `HasqlGauges` — point-in-time snapshot of manager state (master_count, replica_count, active_connections, closing, closed)
+   - `Metrics` — top-level container with `pools: Sequence[PoolMetrics]`, `hasql: HasqlMetrics`, `gauges: HasqlGauges`. The old `drivers` field is a deprecated backward-compat property.
+   - `PoolState` owns the pool state used for enrichment (role, health, response time); `BasePoolManager` owns `_unmanaged_connections` and `_metrics`
+   - Drivers implement `pool_stats(pool) -> PoolStats` (the old `driver_metrics()` is deprecated with a default that delegates to `pool_stats()`)
 
 ### Key Features
 
@@ -86,7 +94,7 @@ All balancer policies live in `hasql/balancer_policy/`. The module structure:
 - `_get_candidates(read_only, fallback_master, choose_master_as_replica)` — builds the list of eligible pools (replicas, master, or both)
 - `_get_pool(...)` — **abstract method**, the only thing subclasses must implement
 
-**Circular import note:** `pool_manager.py` imports `AbstractBalancerPolicy` from `balancer_policy.base` (not through `__init__.py`) to break the cycle: `pool_manager` → `balancer_policy/__init__` → `greedy` → `base` → `pool_manager`. The `base.py` module only imports `pool_manager` under `TYPE_CHECKING`.
+**Import architecture:** The circular import between `pool_manager` and `balancer_policy` is broken by the `PoolStateProvider` protocol in `pool_state.py`. Balancer policies depend on `PoolStateProvider` (direct import from `pool_state.py`, no `TYPE_CHECKING` needed). `BasePoolManager` passes its `pool_state` attribute (which implements `PoolStateProvider`) to the balancer constructor. Import graph (no cycles): `pool_state.py` → `utils.py`, `abc.py`; `balancer_policy/base.py` → `pool_state.py`; `pool_manager.py` → `pool_state.py`, `balancer_policy/`, `health.py`.
 
 **Policies:**
 
@@ -103,7 +111,7 @@ All balancer policies live in `hasql/balancer_policy/`. The module structure:
 - The `+1` ensures all-zero/all-`None` cases produce uniform positive weights (required by `random.choices`)
 - No manual normalization — `random.choices` handles that internally
 
-**Default policy:** When no `balancer_policy` is specified, `BasePoolManager.__init__` defaults to `GreedyBalancerPolicy` (resolved via lazy import to avoid circular import).
+**Default policy:** When no `balancer_policy` is specified, `BasePoolManager.__init__` defaults to `GreedyBalancerPolicy` (imported directly at module level — no lazy import needed since the cycle is broken).
 
 ### Testing Strategy
 

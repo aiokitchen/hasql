@@ -121,13 +121,13 @@ async def test_refresh_timeout_removes_pool_from_available_set():
         acquire_timeout=0.5,
     )
     try:
-        await pool_manager.ready()
+        await pool_manager.pool_state.ready()
         connection = await pool_manager.acquire_master()
 
-        await wait_until(lambda: pool_manager.master_pool_count == 0)
+        await wait_until(lambda: pool_manager.pool_state.master_pool_count == 0)
 
         await pool_manager.release(connection)
-        await wait_until(lambda: pool_manager.master_pool_count == 1)
+        await wait_until(lambda: pool_manager.pool_state.master_pool_count == 1)
     finally:
         await pool_manager.close()
 
@@ -139,7 +139,7 @@ async def test_close_preserves_cancellation_during_sys_connection_release():
         refresh_delay=0.05,
     )
     try:
-        await pool_manager.ready()
+        await pool_manager.pool_state.ready()
         refresh_tasks = list(pool_manager._health.tasks)
         pool_manager.release_to_pool = AsyncMock(
             side_effect=asyncio.CancelledError(),

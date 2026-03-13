@@ -1,11 +1,10 @@
 import asyncio
-from typing import Optional, Sequence
 
 import mock
 
 from hasql.abc import PoolDriver
 from hasql.base import BasePoolManager
-from hasql.metrics import DriverMetrics
+from hasql.metrics import PoolStats
 from hasql.utils import Dsn
 
 
@@ -131,10 +130,13 @@ class TestDriver(PoolDriver[TestPool, TestConnection]):
     def host(self, pool: TestPool):
         return "test-host:5432"
 
-    def driver_metrics(
-        self, pools: Sequence[Optional[TestPool]],
-    ) -> Sequence[DriverMetrics]:
-        return []
+    def pool_stats(self, pool: TestPool) -> PoolStats:
+        return PoolStats(
+            min=0,
+            max=len(pool.connections),
+            idle=pool.freesize,
+            used=len(pool.used),
+        )
 
 
 class TestPoolManager(BasePoolManager[TestPool, TestConnection]):

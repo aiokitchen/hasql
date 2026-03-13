@@ -1,11 +1,10 @@
 import asyncio
-from typing import Optional, Sequence
 
 import aiopg
 
 from hasql.abc import PoolDriver
 from hasql.acquire import TimeoutAcquireContext
-from hasql.metrics import DriverMetrics
+from hasql.metrics import PoolStats
 from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
 
@@ -53,20 +52,13 @@ class AiopgDriver(PoolDriver[aiopg.Pool, aiopg.Connection]):
     def host(self, pool: aiopg.Pool):
         return Dsn.parse(str(pool._dsn)).netloc
 
-    def driver_metrics(
-        self, pools: Sequence[Optional[aiopg.Pool]],
-    ) -> Sequence[DriverMetrics]:
-        return [
-            DriverMetrics(
-                max=p.maxsize or 0,
-                min=p.minsize,
-                idle=p.freesize,
-                used=p.size - p.freesize,
-                host=Dsn.parse(str(p._dsn)).netloc,
-            )
-            for p in pools
-            if p
-        ]
+    def pool_stats(self, pool: aiopg.Pool) -> PoolStats:
+        return PoolStats(
+            min=pool.minsize,
+            max=pool.maxsize or 0,
+            idle=pool.freesize,
+            used=pool.size - pool.freesize,
+        )
 
 
 class PoolManager(BasePoolManager[aiopg.Pool, aiopg.Connection]):

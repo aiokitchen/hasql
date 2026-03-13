@@ -1,16 +1,15 @@
 import random
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Generic, List, Optional, TypeVar
+from typing import Generic, List, Optional, TypeVar
 
-if TYPE_CHECKING:
-    from ..pool_manager import BasePoolManager as _BasePoolManager
+from ..pool_state import PoolStateProvider
 
 PoolT = TypeVar("PoolT")
 
 
 class AbstractBalancerPolicy(ABC, Generic[PoolT]):
-    def __init__(self, pool_manager: "_BasePoolManager[PoolT, Any]"):
-        self._pool_manager = pool_manager
+    def __init__(self, pool_state: PoolStateProvider[PoolT]):
+        self._pool_manager = pool_state
 
     async def get_pool(
         self,

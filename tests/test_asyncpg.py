@@ -3,7 +3,7 @@ import pytest
 from asyncpg import Connection
 
 from hasql.driver.asyncpg import PoolManager
-from hasql.metrics import DriverMetrics
+from hasql.metrics import PoolStats
 
 
 @pytest.fixture
@@ -14,7 +14,7 @@ async def pool_manager(pg_dsn):
         pool_factory_kwargs={"min_size": 10, "max_size": 10},
     )
     try:
-        await pg_pool.ready()
+        await pg_pool.pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -46,18 +46,25 @@ async def test_terminate(pool_manager):
 
 async def test_release(pool_manager):
     asyncpg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.get_pool_freesize(asyncpg_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(asyncpg_pool) == 10
     conn = await pool_manager.acquire_master()
-    assert pool_manager.get_pool_freesize(asyncpg_pool) == 9
+    assert pool_manager.pool_state.get_pool_freesize(asyncpg_pool) == 9
     await pool_manager.release(conn)
-    assert pool_manager.get_pool_freesize(asyncpg_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(asyncpg_pool) == 10
 
 
 async def test_metrics(pool_manager):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics().drivers == [
-            DriverMetrics(max=11, min=11, idle=9, used=2, host=mock.ANY)
-        ]
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 11
+        assert p.idle == 9
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1
 
 
 def test_acquire_from_pool_passes_timeout():
@@ -68,3 +75,18 @@ def test_acquire_from_pool_passes_timeout():
     pool = mock.MagicMock()
     pool_manager.acquire_from_pool(pool, timeout=0.25)
     pool.acquire.assert_called_once_with(timeout=0.25)
+
+
+def test_pool_stats_dynamic_pool_size():
+    """used should be based on actual pool size, not maxsize."""
+    from hasql.driver.asyncpg import AsyncpgDriver
+
+    driver = AsyncpgDriver()
+    pool = mock.MagicMock()
+    pool._maxsize = 20
+    pool._minsize = 5
+    pool.get_size.return_value = 8  # only 8 connections created so far
+    pool._queue.qsize.return_value = 5  # 5 idle
+
+    stats = driver.pool_stats(pool)
+    assert stats == PoolStats(max=20, min=5, idle=5, used=3)

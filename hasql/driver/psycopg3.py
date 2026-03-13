@@ -1,11 +1,11 @@
-from typing import Optional, Sequence
+from typing import Optional
 
 from psycopg import AsyncConnection, errors
 from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool
 
 from hasql.abc import PoolDriver
-from hasql.metrics import DriverMetrics
+from hasql.metrics import PoolStats
 from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
 
@@ -69,7 +69,8 @@ class Psycopg3Driver(PoolDriver[AsyncConnectionPool, AsyncConnection]):
             return row[0] == "off"
 
     async def pool_factory(self, dsn: Dsn, **kwargs) -> AsyncConnectionPool:
-        pool = AsyncConnectionPool(str(dsn), **kwargs)
+        pool = AsyncConnectionPool(str(dsn), open=False, **kwargs)
+        await pool.open()
         await pool.wait()
         return pool
 
@@ -93,26 +94,28 @@ class Psycopg3Driver(PoolDriver[AsyncConnectionPool, AsyncConnection]):
             return "unknown"
         return conninfo_to_dict(conninfo)["host"]
 
-    def driver_metrics(
-        self, pools: Sequence[Optional[AsyncConnectionPool]],
-    ) -> Sequence[DriverMetrics]:
-        stats = [
-            {
-                **p.get_stats(),
-                "host": self.host(p),
-            }
-            for p in pools
-            if p
-        ]
-        return [
-            DriverMetrics(
-                min=stat["pool_min"],
-                max=stat["pool_max"],
-                idle=stat["pool_available"],
-                used=stat["pool_size"],
-                host=stat["host"],
-            ) for stat in stats
-        ]
+    def pool_stats(self, pool: AsyncConnectionPool) -> PoolStats:
+        stats = pool.get_stats()
+        return PoolStats(
+            min=stats["pool_min"],
+            max=stats["pool_max"],
+            idle=stats["pool_available"],
+            used=stats["pool_size"] - stats["pool_available"],
+            extra={
+                "pool_size": stats["pool_size"],
+                "requests_waiting": stats.get("requests_waiting", 0),
+                "requests_num": stats.get("requests_num", 0),
+                "requests_queued": stats.get("requests_queued", 0),
+                "requests_wait_ms": stats.get("requests_wait_ms", 0),
+                "requests_errors": stats.get("requests_errors", 0),
+                "returns_bad": stats.get("returns_bad", 0),
+                "connections_num": stats.get("connections_num", 0),
+                "connections_ms": stats.get("connections_ms", 0),
+                "connections_errors": stats.get("connections_errors", 0),
+                "connections_lost": stats.get("connections_lost", 0),
+                "usage_ms": stats.get("usage_ms", 0),
+            },
+        )
 
 
 class PoolManager(BasePoolManager[AsyncConnectionPool, AsyncConnection]):

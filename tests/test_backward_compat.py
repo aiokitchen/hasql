@@ -50,3 +50,17 @@ def test_base_exports_pool_driver():
     from hasql.base import PoolDriver
 
     assert PoolDriver is Direct
+
+
+def test_base_exports_pool_state():
+    from hasql.base import PoolState
+    from hasql.pool_state import PoolState as Direct
+
+    assert PoolState is Direct
+
+
+def test_base_exports_pool_state_provider():
+    from hasql.base import PoolStateProvider
+    from hasql.pool_state import PoolStateProvider as Direct
+
+    assert PoolStateProvider is Direct

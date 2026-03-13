@@ -42,13 +42,13 @@ async def test_unavailable_db(pool_manager_factory, localhost, db_server_port):
 )
 async def test_catch_cancelled_error(pool_manager_factory, pg_dsn, name):
     async with pool_manager_factory(pg_dsn) as pool_manager:
-        await pool_manager.ready()
-        assert pool_manager.available_pool_count > 0
+        await pool_manager.pool_state.ready()
+        assert pool_manager.pool_state.available_pool_count > 0
         with mock.patch(
             f"hasql.driver.{name}.PoolManager._is_master",
             side_effect=asyncio.CancelledError(),
         ):
-            await pool_manager.wait_next_pool_check()
-            assert pool_manager.available_pool_count == 0
-        await pool_manager.wait_next_pool_check()
-        assert pool_manager.available_pool_count > 0
+            await pool_manager.pool_state.wait_next_pool_check()
+            assert pool_manager.pool_state.available_pool_count == 0
+        await pool_manager.pool_state.wait_next_pool_check()
+        assert pool_manager.pool_state.available_pool_count > 0

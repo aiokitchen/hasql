@@ -72,6 +72,7 @@ develop = [
   "twine",
   "wheel",
   "types-psycopg2",
+  "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]
@@ -151,6 +152,7 @@ filterwarnings = [
 ]
 python_classes = "TestSuite*"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 check_untyped_defs = false

@@ -1,16 +1,14 @@
-import mock
 import pytest
 from aiopg.sa import SAConnection
 
 from hasql.driver.aiopg_sa import PoolManager
-from hasql.metrics import DriverMetrics
 
 
 @pytest.fixture
 async def pool_manager(pg_dsn):
     pg_pool = PoolManager(dsn=pg_dsn, fallback_master=True)
     try:
-        await pg_pool.ready()
+        await pg_pool.pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -32,6 +30,13 @@ async def test_acquire_without_context(pool_manager):
 
 async def test_metrics(pool_manager):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics().drivers == [
-            DriverMetrics(max=11, min=2, idle=0, used=2, host=mock.ANY)
-        ]
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 2
+        assert p.idle == 0
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1

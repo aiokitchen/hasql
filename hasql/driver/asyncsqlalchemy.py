@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import _AsyncGeneratorContextManager, asynccontextmanager
-from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence, Type
+from typing import Any, AsyncIterator, Callable, Dict, Optional, Type
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
@@ -9,7 +9,7 @@ from sqlalchemy.pool import QueuePool
 
 from hasql.abc import PoolDriver
 from hasql.acquire import TimeoutAcquireContext
-from hasql.metrics import DriverMetrics
+from hasql.metrics import PoolStats
 from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
 
@@ -67,20 +67,17 @@ class AsyncSqlAlchemyDriver(PoolDriver[AsyncEngine, AsyncConnection]):
     def host(self, pool: AsyncEngine):
         return pool.sync_engine.url.host
 
-    def driver_metrics(
-        self, pools: Sequence[Optional[AsyncEngine]],
-    ) -> Sequence[DriverMetrics]:
-        return [
-            DriverMetrics(
-                max=p.sync_engine.pool.size(),
-                min=0,
-                idle=p.sync_engine.pool.checkedin(),
-                used=p.sync_engine.pool.checkedout(),
-                host=p.sync_engine.url.host,
-            )
-            for p in pools
-            if p
-        ]
+    def pool_stats(self, pool: AsyncEngine) -> PoolStats:
+        qp = pool.sync_engine.pool
+        return PoolStats(
+            min=0,
+            max=qp.size(),
+            idle=qp.checkedin(),
+            used=qp.checkedout(),
+            extra={
+                "overflow": qp.overflow(),
+            },
+        )
 
 
 class PoolManager(BasePoolManager[AsyncEngine, AsyncConnection]):

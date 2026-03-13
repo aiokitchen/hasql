@@ -6,7 +6,6 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from hasql.driver.asyncsqlalchemy import PoolManager, async_sessionmaker
-from hasql.metrics import DriverMetrics
 
 
 def test_acquire_from_pool_wraps_with_timeout():
@@ -39,7 +38,7 @@ async def pool_manager(pg_dsn):
         pool_factory_kwargs={"pool_size": 10},
     )
     try:
-        await pg_pool.ready()
+        await pg_pool.pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -77,11 +76,11 @@ async def test_terminate(pool_manager):
 
 async def test_release(pool_manager):
     sqlalchemy_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.get_pool_freesize(sqlalchemy_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(sqlalchemy_pool) == 10
     conn = await pool_manager.acquire_master()
-    assert pool_manager.get_pool_freesize(sqlalchemy_pool) == 9
+    assert pool_manager.pool_state.get_pool_freesize(sqlalchemy_pool) == 9
     await pool_manager.release(conn)
-    assert pool_manager.get_pool_freesize(sqlalchemy_pool) == 10
+    assert pool_manager.pool_state.get_pool_freesize(sqlalchemy_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
@@ -93,9 +92,16 @@ async def test_is_connection_closed(pool_manager):
 
 async def test_metrics(pool_manager):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics().drivers == [
-            DriverMetrics(max=11, min=0, idle=0, used=2, host=mock.ANY)
-        ]
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 0
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1
+        assert "overflow" in p.extra
 
 
 @pytest.mark.parametrize("expire_on_commit", [True, False, None])

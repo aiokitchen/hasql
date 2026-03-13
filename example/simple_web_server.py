@@ -48,7 +48,7 @@ class ReplicaHandler(BaseView):
 class MetricsHandler(BaseView):
     async def get(self):
         metrics = self.pool.metrics()
-        return aiohttp.web.json_response([asdict(m) for m in metrics])
+        return aiohttp.web.json_response(asdict(metrics))
 
 
 class REST(AIOHTTPService):

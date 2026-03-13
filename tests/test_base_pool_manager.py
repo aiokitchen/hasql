@@ -26,44 +26,45 @@ async def pool_manager(dsn):
 
 
 def pool_is_master(pool_manager: BasePoolManager, pool):
-    assert pool_manager.pool_is_master(pool)
-    assert not pool_manager.pool_is_replica(pool)
+    assert pool_manager.pool_state.pool_is_master(pool)
+    assert not pool_manager.pool_state.pool_is_replica(pool)
 
 
 def pool_is_replica(pool_manager: BasePoolManager, pool):
-    assert pool_manager.pool_is_replica(pool)
-    assert not pool_manager.pool_is_master(pool)
+    assert pool_manager.pool_state.pool_is_replica(pool)
+    assert not pool_manager.pool_state.pool_is_master(pool)
 
 
 async def test_wait_next_pool_check(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
     master_pool.shutdown()
-    assert pool_manager.master_pool_count == 1
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 0
+    assert pool_manager.pool_state.master_pool_count == 1
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 0
 
 
 async def test_ready_all_hosts(pool_manager: BasePoolManager):
-    await pool_manager.ready()
-    assert len(pool_manager.dsn) == pool_manager.available_pool_count
+    await pool_manager.pool_state.ready()
+    ps = pool_manager.pool_state
+    assert len(ps.dsn) == ps.available_pool_count
 
 
 async def test_ready_min_count_hosts(pool_manager: BasePoolManager):
-    await pool_manager.ready()
-    replica_pools = await pool_manager.get_replica_pools()
+    await pool_manager.pool_state.ready()
+    replica_pools = await pool_manager.pool_state.get_replica_pools()
     for replica_pool in replica_pools:
         replica_pool.shutdown()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
     master_pool.shutdown()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 0
-    assert pool_manager.replica_pool_count == 0
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 0
+    assert pool_manager.pool_state.replica_pool_count == 0
     master_pool.startup()
     master_pool.set_master(True)
-    await pool_manager.ready(masters_count=1, replicas_count=0)
-    assert pool_manager.master_pool_count == 1
-    assert pool_manager.replica_pool_count == 0
+    await pool_manager.pool_state.ready(masters_count=1, replicas_count=0)
+    assert pool_manager.pool_state.master_pool_count == 1
+    assert pool_manager.pool_state.replica_pool_count == 0
 
 
 @pytest.mark.parametrize(
@@ -81,56 +82,56 @@ async def test_ready_with_invalid_arguments(
     replicas_count: Optional[int],
 ):
     with pytest.raises(ValueError):
-        await pool_manager.ready(masters_count, replicas_count)
+        await pool_manager.pool_state.ready(masters_count, replicas_count)
 
 
 async def test_wait_db_restart(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.pool_is_master(master_pool)
+    assert pool_manager.pool_state.pool_is_master(master_pool)
     master_pool.shutdown()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 0
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 0
     master_pool.startup()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 0
-    assert pool_manager.pool_is_replica(master_pool)
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 0
+    assert pool_manager.pool_state.pool_is_replica(master_pool)
 
 
 async def test_master_shutdown(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.pool_is_master(master_pool)
+    assert pool_manager.pool_state.pool_is_master(master_pool)
     master_pool.shutdown()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 0
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 0
 
 
 async def test_replica_shutdown(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     replica_pool = await pool_manager.balancer.get_pool(read_only=True)
-    assert pool_manager.pool_is_replica(replica_pool)
-    assert pool_manager.replica_pool_count == 2
+    assert pool_manager.pool_state.pool_is_replica(replica_pool)
+    assert pool_manager.pool_state.replica_pool_count == 2
     replica_pool.shutdown()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.replica_pool_count == 1
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.replica_pool_count == 1
 
 
 async def test_change_master(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
     replica_pool = await pool_manager.balancer.get_pool(read_only=True)
     pool_is_master(pool_manager, master_pool)
     pool_is_replica(pool_manager, replica_pool)
     master_pool.set_master(False)
     replica_pool.set_master(True)
-    await pool_manager.wait_next_pool_check()
+    await pool_manager.pool_state.wait_next_pool_check()
     pool_is_master(pool_manager, replica_pool)
     pool_is_replica(pool_manager, master_pool)
 
 
 async def test_define_roles(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
     replica_pool = await pool_manager.balancer.get_pool(read_only=True)
     pool_is_master(pool_manager, master_pool)
@@ -138,39 +139,41 @@ async def test_define_roles(pool_manager: BasePoolManager):
 
 
 async def test_acquire_master_and_release(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
+    ps = pool_manager.pool_state
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
-    init_freesize = pool_manager.get_pool_freesize(master_pool)
+    init_freesize = ps.get_pool_freesize(master_pool)
     connection = await pool_manager.acquire_master()
-    assert pool_manager.get_pool_freesize(master_pool) + 1 == init_freesize
+    assert ps.get_pool_freesize(master_pool) + 1 == init_freesize
     assert connection in master_pool.used
     await pool_manager.release(connection)
     assert connection not in master_pool.used
-    assert pool_manager.get_pool_freesize(master_pool) == init_freesize
+    assert ps.get_pool_freesize(master_pool) == init_freesize
 
 
 async def test_acquire_with_context(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
+    ps = pool_manager.pool_state
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
-    init_freesize = pool_manager.get_pool_freesize(master_pool)
+    init_freesize = ps.get_pool_freesize(master_pool)
     async with pool_manager.acquire_master() as connection:
-        assert pool_manager.get_pool_freesize(master_pool) + 1 == init_freesize
+        assert ps.get_pool_freesize(master_pool) + 1 == init_freesize
         assert connection in master_pool.used
     assert connection not in master_pool.used
-    assert pool_manager.get_pool_freesize(master_pool) == init_freesize
+    assert ps.get_pool_freesize(master_pool) == init_freesize
 
 
 async def test_acquire_replica_with_fallback_master_is_true(
     pool_manager: BasePoolManager,
 ):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
-    replica_pools = await pool_manager.get_replica_pools()
+    replica_pools = await pool_manager.pool_state.get_replica_pools()
     for replica_pool in replica_pools:
-        assert pool_manager.pool_is_replica(replica_pool)
+        assert pool_manager.pool_state.pool_is_replica(replica_pool)
         replica_pool.shutdown()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.replica_pool_count == 0
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.replica_pool_count == 0
     async with timeout_context(1):
         async with pool_manager.acquire_replica(
             fallback_master=True,
@@ -181,25 +184,25 @@ async def test_acquire_replica_with_fallback_master_is_true(
 async def test_acquire_replica_with_fallback_master_is_false(
     pool_manager: BasePoolManager,
 ):
-    await pool_manager.ready()
-    replica_pools = await pool_manager.get_replica_pools()
+    await pool_manager.pool_state.ready()
+    replica_pools = await pool_manager.pool_state.get_replica_pools()
     for replica_pool in replica_pools:
-        assert pool_manager.pool_is_replica(replica_pool)
+        assert pool_manager.pool_state.pool_is_replica(replica_pool)
         replica_pool.shutdown()
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.replica_pool_count == 0
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.replica_pool_count == 0
     with pytest.raises(asyncio.TimeoutError):
         async with timeout_context(1):
             await pool_manager.acquire_replica(fallback_master=False)
 
 
 async def test_close(pool_manager: BasePoolManager):
-    await pool_manager.ready()
-    assert pool_manager.master_pool_count > 0
-    assert pool_manager.replica_pool_count > 0
+    await pool_manager.pool_state.ready()
+    assert pool_manager.pool_state.master_pool_count > 0
+    assert pool_manager.pool_state.replica_pool_count > 0
     await pool_manager.close()
-    assert pool_manager.master_pool_count == 0
-    assert pool_manager.replica_pool_count == 0
+    assert pool_manager.pool_state.master_pool_count == 0
+    assert pool_manager.pool_state.replica_pool_count == 0
     for pool in pool_manager:
         assert pool is not None
         assert all(
@@ -209,12 +212,12 @@ async def test_close(pool_manager: BasePoolManager):
 
 
 async def test_terminate(pool_manager: BasePoolManager):
-    await pool_manager.ready()
-    assert pool_manager.master_pool_count > 0
-    assert pool_manager.replica_pool_count > 0
+    await pool_manager.pool_state.ready()
+    assert pool_manager.pool_state.master_pool_count > 0
+    assert pool_manager.pool_state.replica_pool_count > 0
     await pool_manager.terminate()
-    assert pool_manager.master_pool_count == 0
-    assert pool_manager.replica_pool_count == 0
+    assert pool_manager.pool_state.master_pool_count == 0
+    assert pool_manager.pool_state.replica_pool_count == 0
     for pool in pool_manager:
         assert pool is not None
         assert all(
@@ -224,35 +227,36 @@ async def test_terminate(pool_manager: BasePoolManager):
 
 
 async def test_master_behind_firewall(pool_manager: BasePoolManager):
-    await pool_manager.ready()
-    assert pool_manager.master_pool_count == 1
-    master_pool = (await pool_manager.get_master_pools())[0]
+    await pool_manager.pool_state.ready()
+    assert pool_manager.pool_state.master_pool_count == 1
+    master_pool = (await pool_manager.pool_state.get_master_pools())[0]
     master_pool.behind_firewall(True)
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 0
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 0
     master_pool.behind_firewall(False)
-    await pool_manager.wait_next_pool_check()
-    assert pool_manager.master_pool_count == 1
+    await pool_manager.pool_state.wait_next_pool_check()
+    assert pool_manager.pool_state.master_pool_count == 1
 
 
 async def test_replica_behind_firewall(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     replica_pool_count = 2
-    assert pool_manager.replica_pool_count == replica_pool_count
-    replica_pools = await pool_manager.get_replica_pools()
+    assert pool_manager.pool_state.replica_pool_count == replica_pool_count
+    replica_pools = await pool_manager.pool_state.get_replica_pools()
     for replica_pool in replica_pools:
+        ps = pool_manager.pool_state
         replica_pool.behind_firewall(True)
-        await pool_manager.wait_next_pool_check()
-        assert pool_manager.replica_pool_count == replica_pool_count - 1
+        await ps.wait_next_pool_check()
+        assert ps.replica_pool_count == replica_pool_count - 1
         replica_pool.behind_firewall(False)
-        await pool_manager.wait_next_pool_check()
-        assert pool_manager.replica_pool_count == replica_pool_count
+        await ps.wait_next_pool_check()
+        assert ps.replica_pool_count == replica_pool_count
 
 
 async def test_check_pool_canceled_error_while_releasing_connection(
     pool_manager: BasePoolManager
 ):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     master_pool = await pool_manager.balancer.get_pool(read_only=False)
 
     with ExitStack() as stack:
@@ -281,7 +285,7 @@ def test_invalid_balancer_policy():
 
 
 async def test_release_unknown_connection(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     fake_conn = object()
     with pytest.raises(ValueError, match="is not a member of this pool"):
         await pool_manager.release(fake_conn)
@@ -290,7 +294,7 @@ async def test_release_unknown_connection(pool_manager: BasePoolManager):
 async def test_acquire_master_as_replica_weight_write_raises(
     pool_manager: BasePoolManager,
 ):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     with pytest.raises(ValueError, match="master_as_replica_weight"):
         pool_manager.acquire(read_only=False, master_as_replica_weight=0.5)
 
@@ -300,13 +304,13 @@ async def test_acquire_master_as_replica_weight_out_of_range(
     pool_manager: BasePoolManager,
     weight: float,
 ):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     with pytest.raises(ValueError, match="segment"):
         pool_manager.acquire(read_only=True, master_as_replica_weight=weight)
 
 
 async def test_properties(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     assert pool_manager.refresh_delay == 0.1
     assert pool_manager.refresh_timeout == 0.2
     assert pool_manager.pool_factory_kwargs is not None
@@ -315,13 +319,22 @@ async def test_properties(pool_manager: BasePoolManager):
 
 
 async def test_metrics_after_acquire(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     conn = await pool_manager.acquire_master()
     from hasql.metrics import Metrics
     m = pool_manager.metrics()
     assert isinstance(m, Metrics)
     assert m.hasql.pool == 1
     assert m.hasql.add_connections.get("test-host:5432") == 1
+    assert len(m.pools) == 3
+    assert m.gauges.master_count == 1
+    assert m.gauges.replica_count == 2
+    assert m.gauges.active_connections == 1
+    assert m.gauges.closing is False
+    assert m.gauges.closed is False
+    master = [p for p in m.pools if p.role == "master"][0]
+    assert master.in_flight == 1
+    assert master.healthy is True
     await pool_manager.release(conn)
 
 
@@ -329,14 +342,14 @@ async def test_aenter_aexit(dsn):
     async with TestPoolManager(
         dsn, refresh_timeout=0.2, refresh_delay=0.1,
     ) as pm:
-        assert pm.master_pool_count > 0
+        assert pm.pool_state.master_pool_count > 0
     assert pm.closed
 
 
 async def test_terminate_skips_none_pools(pool_manager: BasePoolManager):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     # Force a None entry into the pools list
-    pool_manager._pools.append(None)
+    pool_manager.pool_state._pools.append(None)
     await pool_manager.terminate()
     assert pool_manager.closed
 
@@ -344,7 +357,7 @@ async def test_terminate_skips_none_pools(pool_manager: BasePoolManager):
 async def test_close_releases_unmanaged_connections(
     pool_manager: BasePoolManager,
 ):
-    await pool_manager.ready()
+    await pool_manager.pool_state.ready()
     conn = await pool_manager.acquire_master()
     assert conn in pool_manager._unmanaged_connections
     await pool_manager.close()
@@ -360,20 +373,20 @@ async def test_check_pool_task_cancelled_error_non_closing():
         refresh_delay=0.05,
     )
     try:
-        await pool_manager.ready()
-        assert pool_manager.master_pool_count == 1
+        await pool_manager.pool_state.ready()
+        assert pool_manager.pool_state.master_pool_count == 1
 
         with patch.object(
             pool_manager,
             '_is_master',
             AsyncMock(side_effect=asyncio.CancelledError()),
         ):
-            await pool_manager.wait_next_pool_check()
-            assert pool_manager.master_pool_count == 0
+            await pool_manager.pool_state.wait_next_pool_check()
+            assert pool_manager.pool_state.master_pool_count == 0
 
         # Recovers after the patch is removed
-        await pool_manager.wait_next_pool_check()
-        assert pool_manager.master_pool_count == 1
+        await pool_manager.pool_state.wait_next_pool_check()
+        assert pool_manager.pool_state.master_pool_count == 1
     finally:
         await pool_manager.close()
 
@@ -399,9 +412,9 @@ async def test_wait_creating_pool_retries_on_failure():
             refresh_delay=0.05,
         )
         try:
-            await pm.ready(timeout=5)
+            await pm.pool_state.ready(timeout=5)
             assert call_count >= 3
-            assert pm.master_pool_count == 1
+            assert pm.pool_state.master_pool_count == 1
         finally:
             await pm.close()
 
@@ -414,10 +427,10 @@ async def test_check_pool_task_release_exception():
         refresh_delay=0.05,
     )
     try:
-        await pool_manager.ready()
-        assert pool_manager.master_pool_count == 1
+        await pool_manager.pool_state.ready()
+        assert pool_manager.pool_state.master_pool_count == 1
 
-        master_pool = (await pool_manager.get_master_pools())[0]
+        master_pool = (await pool_manager.pool_state.get_master_pools())[0]
 
         with ExitStack() as stack:
             for conn in master_pool.connections:

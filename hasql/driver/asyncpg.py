@@ -1,11 +1,11 @@
 import asyncio
-from typing import ClassVar, Dict, Optional, Sequence
+from typing import ClassVar, Dict
 
 import asyncpg  # type: ignore[import-untyped]
 from packaging.version import parse as parse_version
 
 from hasql.abc import PoolDriver
-from hasql.metrics import DriverMetrics
+from hasql.metrics import PoolStats
 from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
 
@@ -58,20 +58,14 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
             addr, _ = pool._working_addr
             return addr
 
-    def driver_metrics(
-        self, pools: Sequence[Optional[asyncpg.Pool]],
-    ) -> Sequence[DriverMetrics]:
-        return [
-            DriverMetrics(
-                max=p._maxsize,
-                min=p._minsize,
-                idle=self.get_pool_freesize(p),
-                used=p._maxsize - self.get_pool_freesize(p),
-                host=self.host(p),
-            )
-            for p in pools
-            if p
-        ]
+    def pool_stats(self, pool: asyncpg.Pool) -> PoolStats:
+        idle = self.get_pool_freesize(pool)
+        return PoolStats(
+            min=pool._minsize,
+            max=pool._maxsize,
+            idle=idle,
+            used=pool.get_size() - idle,
+        )
 
 
 class PoolManager(BasePoolManager[asyncpg.Pool, asyncpg.Connection]):

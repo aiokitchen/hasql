@@ -403,6 +403,247 @@ single "best" pool.
         balancer_policy=RandomWeightedBalancerPolicy,
     )
 
+Metrics
+=======
+
+Every ``PoolManager`` exposes a ``metrics()`` method that returns a
+point-in-time snapshot of the entire cluster state.
+
+.. code-block:: python
+
+    m = pool_manager.metrics()
+
+The returned ``Metrics`` object contains three layers:
+
+``m.pools`` — per-pool metrics
+******************************
+
+A sequence of ``PoolMetrics`` dataclasses, one per database host:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Field
+     - Description
+   * - ``host``
+     - Host address of the pool
+   * - ``role``
+     - ``"master"``, ``"replica"``, or ``None`` (unknown)
+   * - ``healthy``
+     - ``True`` if the host has a known role
+   * - ``min``
+     - Minimum connections configured
+   * - ``max``
+     - Maximum connections configured
+   * - ``idle``
+     - Connections currently idle in the pool
+   * - ``used``
+     - Connections currently checked out
+   * - ``response_time``
+     - Last health-check round-trip time (seconds)
+   * - ``in_flight``
+     - Connections acquired through the pool manager
+   * - ``extra``
+     - Driver-specific data (e.g. psycopg3's ``requests_waiting``,
+       SQLAlchemy's ``overflow``)
+
+``m.gauges`` — cluster-wide gauges
+***********************************
+
+A ``HasqlGauges`` dataclass with aggregate state:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Description
+   * - ``master_count``
+     - Number of detected masters
+   * - ``replica_count``
+     - Number of detected replicas
+   * - ``available_count``
+     - Total pools with a known role
+   * - ``active_connections``
+     - Connections currently held by application code
+   * - ``closing``
+     - ``True`` while the pool manager is shutting down
+   * - ``closed``
+     - ``True`` after shutdown is complete
+
+``m.hasql`` — internal counters
+*******************************
+
+A ``HasqlMetrics`` dataclass with cumulative acquire/release counters
+and timing data, useful for tracking pool manager overhead.
+
+Example: simple metrics endpoint
+********************************
+
+.. code-block:: python
+
+    from dataclasses import asdict
+    import json
+
+    async def handle_metrics(request):
+        m = pool_manager.metrics()
+        return web.json_response(asdict(m))
+
+
+Exporting metrics to OTLP
+==========================
+
+hasql ships with ready-to-use examples for exporting metrics to any
+OpenTelemetry-compatible collector (Prometheus, Grafana, Datadog, etc.)
+via OTLP gRPC.
+
+Quick start
+***********
+
+Install the OpenTelemetry dependencies:
+
+.. code-block:: bash
+
+    pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc
+
+Use the helper from ``example/otlp/common.py``:
+
+.. code-block:: python
+
+    from hasql.asyncpg import PoolManager
+    from example.otlp.common import (
+        register_hasql_metrics,
+        setup_meter_provider,
+    )
+
+    provider = setup_meter_provider(export_interval_ms=10_000)
+
+    pool = PoolManager(dsn, fallback_master=True)
+    await pool.pool_state.ready()
+
+    # Registers observable gauges — OTel calls metrics()
+    # automatically at each export interval
+    register_hasql_metrics(pool)
+
+Exported OTel gauges
+********************
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Gauge name
+     - Labels
+     - Source
+   * - ``db.pool.connections.min``
+     - ``host``, ``role``
+     - ``PoolMetrics.min``
+   * - ``db.pool.connections.max``
+     - ``host``, ``role``
+     - ``PoolMetrics.max``
+   * - ``db.pool.connections.idle``
+     - ``host``, ``role``
+     - ``PoolMetrics.idle``
+   * - ``db.pool.connections.used``
+     - ``host``, ``role``
+     - ``PoolMetrics.used``
+   * - ``db.pool.connections.in_flight``
+     - ``host``, ``role``
+     - ``PoolMetrics.in_flight``
+   * - ``db.pool.healthy``
+     - ``host``, ``role``
+     - ``PoolMetrics.healthy``
+   * - ``db.pool.health_check.duration``
+     - ``host``, ``role``
+     - ``PoolMetrics.response_time``
+   * - ``db.pool.masters``
+     - —
+     - ``HasqlGauges.master_count``
+   * - ``db.pool.replicas``
+     - —
+     - ``HasqlGauges.replica_count``
+   * - ``db.pool.active_connections``
+     - —
+     - ``HasqlGauges.active_connections``
+   * - ``db.pool.extra.<key>``
+     - ``host``, ``role``
+     - ``PoolMetrics.extra[key]``
+
+Driver-specific extras
+**********************
+
+Some drivers expose additional pool internals via ``PoolMetrics.extra``.
+Use ``register_extra_gauges()`` to export them as OTel gauges:
+
+.. code-block:: python
+
+    from example.otlp.common import register_extra_gauges
+
+    # psycopg3: queue depth, error counters, etc.
+    register_extra_gauges(pool, [
+        "pool_size", "requests_waiting", "connections_errors",
+    ])
+
+    # SQLAlchemy: overflow connections
+    register_extra_gauges(pool, ["overflow"])
+
+Per-driver examples live in ``example/otlp/``.
+
+Dashboard recommendations
+*************************
+
+The exported metrics map well to Grafana / Datadog dashboard panels:
+
+**Cluster health overview**
+
+* ``db.pool.masters`` / ``db.pool.replicas`` — single-stat panels;
+  alert when master drops to 0 or replicas drop below expected count
+* ``db.pool.healthy`` by ``host`` — table or status map showing
+  per-host health; any 0 value means the host lost its role
+
+**Connection pool utilization**
+
+* ``db.pool.connections.used`` / ``db.pool.connections.max`` by
+  ``host`` — saturation ratio; alert when approaching 100%
+* ``db.pool.connections.idle`` by ``host`` — if consistently 0, the
+  pool is undersized
+* ``db.pool.connections.in_flight`` by ``host`` — connections held by
+  application code right now; spikes indicate slow queries or leaked
+  connections
+
+**Latency and performance**
+
+* ``db.pool.health_check.duration`` by ``host`` — time series;
+  rising latency on a replica can predict upcoming failover
+* Compare ``response_time`` across hosts to spot slow replicas
+  before they affect user traffic
+
+**Pool manager overhead**
+
+* ``db.pool.active_connections`` — total connections held across all
+  pools; correlate with application request rate to right-size pools
+
+**Driver-specific panels (psycopg3)**
+
+* ``db.pool.extra.requests_waiting`` — queue depth; sustained > 0
+  means the pool is saturated
+* ``db.pool.extra.connections_errors`` — connection failures;
+  alert on rate increase
+
+**Alerting rules**
+
+* ``db.pool.masters == 0`` — **critical**: no master available
+* ``db.pool.replicas == 0`` — **warning**: all reads will fall back
+  to master (if ``fallback_master=True``) or fail
+* ``db.pool.connections.used / db.pool.connections.max > 0.9`` —
+  **warning**: pool near exhaustion
+* ``db.pool.health_check.duration > threshold`` — **warning**: host
+  becoming slow, may lose role soon
+* ``db.pool.extra.requests_waiting > 0`` for sustained period —
+  **warning**: pool undersized for current load
+
+
 Architecture
 ============
 
@@ -437,7 +678,7 @@ thin subclass that passes the appropriate ``PoolDriver`` instance to
     pool = PoolManager("postgresql://master,replica/db")
 
 Custom drivers
-~~~~~~~~~~~~~~
+**************
 
 You can implement a custom driver by subclassing ``PoolDriver``:
 
@@ -473,7 +714,7 @@ Overview
     * ``terminate_pool(pool)`` - Forcefully terminate a pool
     * ``is_connection_closed(connection)`` - Check if connection is closed
     * ``host(pool)`` - Return host address for a pool
-    * ``driver_metrics(pools)`` - Return driver-level metrics
+    * ``pool_stats(pool)`` - Return ``PoolStats`` for a single pool
 
     Optional override:
 

@@ -1,8 +1,19 @@
 import time
+import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
+
+
+@dataclass(frozen=True)
+class PoolStats:
+    """Raw pool statistics returned by a driver for a single pool."""
+    min: int
+    max: int
+    idle: int
+    used: int
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -71,6 +82,48 @@ class CalculateMetrics:
 
 
 @dataclass(frozen=True)
+class PoolMetrics:
+    """Per-pool metrics, enriched by the pool manager."""
+    host: str
+    role: Optional[str]
+    healthy: bool
+    min: int
+    max: int
+    idle: int
+    used: int
+    response_time: Optional[float]
+    in_flight: int
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class HasqlGauges:
+    """Point-in-time snapshot of pool manager state."""
+    master_count: int
+    replica_count: int
+    available_count: int
+    active_connections: int
+    closing: bool
+    closed: bool
+
+
+@dataclass(frozen=True)
 class Metrics:
-    drivers: Sequence[DriverMetrics]
+    pools: Sequence[PoolMetrics]
     hasql: HasqlMetrics
+    gauges: HasqlGauges
+
+    @property
+    def drivers(self) -> Sequence[DriverMetrics]:
+        """Backward-compatible accessor. Deprecated."""
+        warnings.warn(
+            "Metrics.drivers is deprecated, use Metrics.pools instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return [
+            DriverMetrics(
+                min=p.min, max=p.max, idle=p.idle, used=p.used, host=p.host,
+            )
+            for p in self.pools
+        ]

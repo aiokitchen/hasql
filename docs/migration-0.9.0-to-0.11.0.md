@@ -1,4 +1,4 @@
-# Migration Guide: hasql 0.9.0 → 0.10.0
+# Migration Guide: hasql 0.9.0 → 0.11.0
 
 ## TL;DR
 
@@ -11,12 +11,14 @@
 | Patch `_is_master` / `_pool_factory` in tests | **None** — proxy methods still patchable |
 | Access `_refresh_role_tasks` | **Update** — use `_health.tasks` |
 | Call `_notify_about_pool_has_checked` | **Update** — use `_health._notify_about_pool_has_checked` |
+| `metrics().drivers` → list of `DriverMetrics` | **Update** — use `metrics().pools` → list of `PoolMetrics` |
+| `PoolDriver.driver_metrics(pools)` override | **Update** — implement `pool_stats(pool) -> PoolStats` instead |
+| `from hasql.metrics import DriverMetrics` | **None** — still available, but deprecated |
+| `metrics().hasql` | **None** — works unchanged |
 
 ---
 
-## What changed
-
-### Architecture: Composition over Inheritance
+## Architecture: Composition over Inheritance
 
 `BasePoolManager` was an **abstract** class. Each driver (aiopg, asyncpg, etc.)
 subclassed it and implemented ~10 abstract methods. Now:
@@ -30,7 +32,7 @@ subclassed it and implemented ~10 abstract methods. Now:
 BasePoolManager (ABC)
   └── hasql.aiopg.PoolManager  (implements all abstract methods)
 
-# After (0.10.0)
+# After (0.11.0)
 PoolDriver (ABC)
   └── AiopgDriver              (implements driver interface)
 
@@ -46,6 +48,7 @@ BasePoolManager (concrete)     (has-a PoolDriver)
 | `hasql.acquire` | `AcquireContext`, `TimeoutAcquireContext`, `PoolAcquireContext` |
 | `hasql.constants` | `DEFAULT_REFRESH_DELAY`, `DEFAULT_ACQUIRE_TIMEOUT`, etc. |
 | `hasql.health` | `PoolHealthMonitor` (extracted from BasePoolManager) |
+| `hasql.pool_state` | `PoolState`, `PoolStateProvider` protocol |
 | `hasql.balancer_policy` | `AbstractBalancerPolicy` |
 | `hasql.pool_manager` | `BasePoolManager` (concrete) |
 | `hasql.driver.*` | Driver implementations + PoolManager wrappers |
@@ -117,7 +120,7 @@ with mock.patch("hasql.aiopg.PoolManager._is_master", ...):
 **Before (0.9.0):** You subclassed `BasePoolManager` and implemented abstract methods.
 
 ```python
-# OLD — will NOT work in 0.10.0
+# OLD — will NOT work in 0.11.0
 from hasql.base import BasePoolManager, TimeoutAcquireContext
 
 class MyPoolManager(BasePoolManager):
@@ -161,12 +164,14 @@ class MyPoolManager(BasePoolManager):
         return [...]
 ```
 
-**After (0.10.0):** Extract the driver logic into a `PoolDriver` subclass.
+**After (0.11.0):** Extract the driver logic into a `PoolDriver` subclass.
+Implement `pool_stats()` instead of `driver_metrics()`.
 
 ```python
-# NEW — 0.10.0
+# NEW — 0.11.0
 from hasql.abc import PoolDriver
 from hasql.acquire import TimeoutAcquireContext
+from hasql.metrics import PoolStats
 from hasql.pool_manager import BasePoolManager
 
 class MyDriver(PoolDriver[MyPool, MyConnection]):
@@ -205,8 +210,11 @@ class MyDriver(PoolDriver[MyPool, MyConnection]):
     def host(self, pool):
         return pool.host
 
-    def driver_metrics(self, pools):  # was _driver_metrics(self)
-        return [...]
+    def pool_stats(self, pool) -> PoolStats:  # was _driver_metrics(self)
+        return PoolStats(
+            min=pool.min, max=pool.max,
+            idle=pool.idle, used=pool.size - pool.idle,
+        )
 
 
 class MyPoolManager(BasePoolManager[MyPool, MyConnection]):
@@ -216,14 +224,14 @@ class MyPoolManager(BasePoolManager[MyPool, MyConnection]):
 
 ### Method name mapping
 
-| Old (on BasePoolManager) | New (on PoolDriver) |
+| Old (on BasePoolManager, 0.9.0) | New (on PoolDriver, 0.11.0) |
 |---|---|
 | `_is_master(connection)` | `is_master(connection)` |
 | `_pool_factory(dsn)` | `pool_factory(dsn, **kwargs)` |
 | `_prepare_pool_factory_kwargs(kwargs)` | `prepare_pool_factory_kwargs(kwargs)` |
 | `_close(pool)` | `close_pool(pool)` |
 | `_terminate(pool)` | `terminate_pool(pool)` |
-| `_driver_metrics()` | `driver_metrics(pools)` |
+| `_driver_metrics()` | `pool_stats(pool) -> PoolStats` |
 | `get_pool_freesize(pool)` | `get_pool_freesize(pool)` |
 | `acquire_from_pool(pool, **kwargs)` | `acquire_from_pool(pool, *, timeout=None, **kwargs)` |
 | `release_to_pool(connection, pool)` | `release_to_pool(connection, pool)` |
@@ -235,8 +243,8 @@ Key differences:
 - **Public names:** `_is_master` → `is_master`, `_close` → `close_pool`, etc.
 - **`pool_factory` receives `**kwargs`:** The pool factory kwargs are passed
   as arguments instead of being read from `self.pool_factory_kwargs`.
-- **`driver_metrics` receives `pools`:** Instead of reading `self.pools`
-  from the manager, the pools sequence is passed as an argument.
+- **`pool_stats` replaces `driver_metrics`:** Returns `PoolStats` for a single
+  pool. The manager handles iteration, None-filtering, and enrichment.
 - **`acquire_from_pool` has explicit `timeout`:** Timeout is a dedicated
   keyword argument, not smuggled through `**kwargs`.
 
@@ -261,7 +269,7 @@ class PoolManager(BasePoolManager):
         return ctx
 ```
 
-**After (0.10.0):** `timeout` is an explicit parameter on `acquire_from_pool`.
+**After (0.11.0):** `timeout` is an explicit parameter on `acquire_from_pool`.
 No smuggling needed.
 
 ```python
@@ -283,7 +291,7 @@ for task in pool_manager._refresh_role_tasks:
     task.cancel()
 ```
 
-**After (0.10.0):**
+**After (0.11.0):**
 
 ```python
 for task in pool_manager._health.tasks:
@@ -302,7 +310,7 @@ has been extracted into `PoolHealthMonitor` (`hasql.health`), accessible via
 await self._notify_about_pool_has_checked(dsn)
 ```
 
-**After (0.10.0):**
+**After (0.11.0):**
 
 ```python
 await self._health._notify_about_pool_has_checked(dsn)
@@ -317,9 +325,81 @@ pool = PoolManager("postgresql://master,replica/db")
 driver = pool.driver  # PoolDriver instance
 ```
 
+### 6. Metrics: `PoolMetrics` replaces `DriverMetrics`
+
+The old `Metrics.drivers` field returned a flat list of `DriverMetrics` with only
+pool-level counters (`min`, `max`, `idle`, `used`, `host`). The new `Metrics.pools`
+returns `PoolMetrics` objects enriched with context the pool manager already knows:
+
+```python
+@dataclass(frozen=True)
+class PoolMetrics:
+    host: str
+    role: Optional[str]            # "master" | "replica" | None
+    healthy: bool
+    min: int
+    max: int
+    idle: int
+    used: int
+    response_time: Optional[float] # health-check RTT
+    in_flight: int                 # connections currently checked out
+    extra: Dict[str, Any]          # driver-specific data
+```
+
+**Before (0.9.0):**
+
+```python
+m = pool_manager.metrics()
+for d in m.drivers:
+    print(d.host, d.used)
+```
+
+**After (0.11.0):**
+
+```python
+m = pool_manager.metrics()
+for p in m.pools:
+    print(p.host, p.role, p.used, p.in_flight, p.response_time)
+```
+
+The old `m.drivers` property still works but emits a `DeprecationWarning`.
+
+### 7. New `Metrics.gauges` field
+
+`Metrics` now includes a `gauges: HasqlGauges` field — a point-in-time snapshot
+of the pool manager state:
+
+```python
+@dataclass(frozen=True)
+class HasqlGauges:
+    master_count: int
+    replica_count: int
+    available_count: int
+    active_connections: int
+    closing: bool
+    closed: bool
+```
+
+```python
+m = pool_manager.metrics()
+print(m.gauges.master_count, m.gauges.replica_count)
+print(m.gauges.active_connections)
+```
+
+### 8. Driver-specific `extra` data
+
+Drivers now surface rich introspection data via `PoolStats.extra`, which flows
+through to `PoolMetrics.extra`:
+
+- **psycopg3:** `pool_size`, `requests_waiting`, `requests_num`, `connections_errors`, `connections_lost`, etc.
+- **SQLAlchemy:** `overflow`
+- **aiopg / asyncpg:** empty (no extra data available)
+
 ---
 
-## New capability: Swappable drivers
+## New capabilities
+
+### Swappable drivers
 
 With composition, you can now swap drivers without subclassing the manager:
 
@@ -349,3 +429,11 @@ async def test_my_driver():
     assert driver.get_pool_freesize(pool) == 5
     await driver.close_pool(pool)
 ```
+
+### Pool state extraction
+
+Pool state management has been extracted from `BasePoolManager` into a dedicated
+`PoolState` class (`hasql/pool_state.py`), accessible via the public `pool_state`
+attribute. Balancer policies now depend on the `PoolStateProvider` protocol instead
+of `BasePoolManager` directly. This breaks the circular import between
+`pool_manager` and `balancer_policy`.

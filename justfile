@@ -19,6 +19,7 @@ lint: ruff mypy
 # Run tests
 test *ARGS:
     uv run pytest -vv \
+        -n auto \
         --cov=hasql --cov-report=term-missing \
         --doctest-modules \
         --aiomisc-test-timeout=30 \

@@ -1,8 +1,9 @@
+import warnings
 from abc import ABC, abstractmethod
 from typing import Generic, Optional, Sequence, TypeVar
 
 from .acquire import AcquireContext
-from .metrics import DriverMetrics
+from .metrics import DriverMetrics, PoolStats
 from .utils import Dsn
 
 PoolT = TypeVar("PoolT")
@@ -51,10 +52,25 @@ class PoolDriver(ABC, Generic[PoolT, ConnT]):
     def host(self, pool: PoolT) -> str: ...
 
     @abstractmethod
+    def pool_stats(self, pool: PoolT) -> PoolStats: ...
+
     def driver_metrics(
         self,
         pools: Sequence[Optional[PoolT]],
-    ) -> Sequence[DriverMetrics]: ...
+    ) -> Sequence[DriverMetrics]:
+        warnings.warn(
+            "driver_metrics() is deprecated, implement pool_stats() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return [
+            DriverMetrics(
+                min=s.min, max=s.max, idle=s.idle, used=s.used,
+                host=self.host(p),
+            )
+            for p in pools if p
+            for s in [self.pool_stats(p)]
+        ]
 
     def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
         """Hook for drivers to adjust pool factory kwargs."""

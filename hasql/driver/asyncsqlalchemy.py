@@ -48,6 +48,8 @@ class AsyncSqlAlchemyDriver(PoolDriver[AsyncEngine, AsyncConnection]):
         d = str(dsn)
         if d.startswith('postgresql://'):
             d = d.replace('postgresql://', 'postgresql+asyncpg://', 1)
+        elif d.startswith('postgres://'):
+            d = d.replace('postgres://', 'postgresql+asyncpg://', 1)
         return create_async_engine(d, **kwargs)
 
     def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
@@ -65,7 +67,7 @@ class AsyncSqlAlchemyDriver(PoolDriver[AsyncEngine, AsyncConnection]):
         return connection.closed
 
     def host(self, pool: AsyncEngine):
-        return pool.sync_engine.url.host
+        return pool.sync_engine.url.host or "unknown"
 
     def pool_stats(self, pool: AsyncEngine) -> PoolStats:
         qp = pool.sync_engine.pool

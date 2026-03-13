@@ -41,7 +41,7 @@ class CalculateMetrics:
     _pool_time: float = 0.
     _acquire: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
     _acquire_time: Dict[str, float] = field(
-        default_factory=lambda: defaultdict(int)
+        default_factory=lambda: defaultdict(float)
     )
     _add_connections: Dict[str, int] = field(default_factory=dict)
     _remove_connections: Dict[str, int] = field(default_factory=dict)
@@ -60,15 +60,19 @@ class CalculateMetrics:
     def with_get_pool(self):
         self._pool += 1
         tt = time.monotonic()
-        yield
-        self._pool_time += time.monotonic() - tt
+        try:
+            yield
+        finally:
+            self._pool_time += time.monotonic() - tt
 
     @contextmanager
     def with_acquire(self, pool: str):
         self._acquire[pool] += 1
         tt = time.monotonic()
-        yield
-        self._acquire_time[pool] += time.monotonic() - tt
+        try:
+            yield
+        finally:
+            self._acquire_time[pool] += time.monotonic() - tt
 
     def add_connection(self, dsn: str):
         self._add_connections[dsn] = (

@@ -1,10 +1,10 @@
-# Migration Guide: hasql 0.9.0 → 0.11.0
+# Migration Guide: hasql 0.9.0 → 0.10.0
 
 ## TL;DR
 
 | What you do today | Action needed |
 |---|---|
-| `from hasql.aiopg import PoolManager` (or asyncpg, psycopg3, etc.) | **None** — works unchanged |
+| `from hasql.aiopg import PoolManager` (or asyncpg, psycopg3, etc.) | **Update required** — import from `hasql.driver.*` |
 | `from hasql.base import BasePoolManager, TimeoutAcquireContext` | **None** — re-exports preserved |
 | Subclass `BasePoolManager` to add a custom driver | **Rewrite** — extract driver into `PoolDriver` subclass |
 | Override `_prepare_acquire_kwargs` | **Rewrite** — use explicit `timeout` parameter |
@@ -32,7 +32,7 @@ subclassed it and implemented ~10 abstract methods. Now:
 BasePoolManager (ABC)
   └── hasql.aiopg.PoolManager  (implements all abstract methods)
 
-# After (0.11.0)
+# After (0.10.0)
 PoolDriver (ABC)
   └── AiopgDriver              (implements driver interface)
 
@@ -53,7 +53,9 @@ BasePoolManager (concrete)     (has-a PoolDriver)
 | `hasql.pool_manager` | `BasePoolManager` (concrete) |
 | `hasql.driver.*` | Driver implementations + PoolManager wrappers |
 
-All old import paths from `hasql.base` continue to work via re-exports.
+Old import paths from `hasql.base` continue to work via re-exports.
+Driver import paths (`hasql.aiopg`, `hasql.asyncpg`, etc.) have moved to
+`hasql.driver.*` and must be updated (see below).
 
 ---
 
@@ -61,16 +63,23 @@ All old import paths from `hasql.base` continue to work via re-exports.
 
 ### Using built-in PoolManagers
 
-If you use hasql through the driver-specific `PoolManager` classes, nothing changes:
+Driver-specific `PoolManager` classes have moved from `hasql.<driver>` to
+`hasql.driver.<driver>`. Update your imports:
 
 ```python
-# These all work exactly as before
-from hasql.aiopg import PoolManager
-from hasql.asyncpg import PoolManager
-from hasql.psycopg3 import PoolManager
-from hasql.asyncsqlalchemy import PoolManager
-from hasql.aiopg_sa import PoolManager
-from hasql.asyncpgsa import PoolManager
+# Old (0.9.0)                              # New (0.10.0)
+from hasql.aiopg import PoolManager        # from hasql.driver.aiopg import PoolManager
+from hasql.asyncpg import PoolManager      # from hasql.driver.asyncpg import PoolManager
+from hasql.psycopg3 import PoolManager     # from hasql.driver.psycopg3 import PoolManager
+from hasql.asyncsqlalchemy import PoolManager  # from hasql.driver.asyncsqlalchemy import PoolManager
+from hasql.aiopg_sa import PoolManager     # from hasql.driver.aiopg_sa import PoolManager
+from hasql.asyncpgsa import PoolManager    # from hasql.driver.asyncpgsa import PoolManager
+```
+
+Usage remains the same after updating the import:
+
+```python
+from hasql.driver.asyncpg import PoolManager
 
 pool = PoolManager("postgresql://master,replica/db")
 await pool.ready()
@@ -120,7 +129,7 @@ with mock.patch("hasql.aiopg.PoolManager._is_master", ...):
 **Before (0.9.0):** You subclassed `BasePoolManager` and implemented abstract methods.
 
 ```python
-# OLD — will NOT work in 0.11.0
+# OLD — will NOT work in 0.10.0
 from hasql.base import BasePoolManager, TimeoutAcquireContext
 
 class MyPoolManager(BasePoolManager):
@@ -164,11 +173,11 @@ class MyPoolManager(BasePoolManager):
         return [...]
 ```
 
-**After (0.11.0):** Extract the driver logic into a `PoolDriver` subclass.
+**After (0.10.0):** Extract the driver logic into a `PoolDriver` subclass.
 Implement `pool_stats()` instead of `driver_metrics()`.
 
 ```python
-# NEW — 0.11.0
+# NEW — 0.10.0
 from hasql.abc import PoolDriver
 from hasql.acquire import TimeoutAcquireContext
 from hasql.metrics import PoolStats
@@ -224,7 +233,7 @@ class MyPoolManager(BasePoolManager[MyPool, MyConnection]):
 
 ### Method name mapping
 
-| Old (on BasePoolManager, 0.9.0) | New (on PoolDriver, 0.11.0) |
+| Old (on BasePoolManager, 0.9.0) | New (on PoolDriver, 0.10.0) |
 |---|---|
 | `_is_master(connection)` | `is_master(connection)` |
 | `_pool_factory(dsn)` | `pool_factory(dsn, **kwargs)` |
@@ -269,7 +278,7 @@ class PoolManager(BasePoolManager):
         return ctx
 ```
 
-**After (0.11.0):** `timeout` is an explicit parameter on `acquire_from_pool`.
+**After (0.10.0):** `timeout` is an explicit parameter on `acquire_from_pool`.
 No smuggling needed.
 
 ```python
@@ -291,7 +300,7 @@ for task in pool_manager._refresh_role_tasks:
     task.cancel()
 ```
 
-**After (0.11.0):**
+**After (0.10.0):**
 
 ```python
 for task in pool_manager._health.tasks:
@@ -310,7 +319,7 @@ has been extracted into `PoolHealthMonitor` (`hasql.health`), accessible via
 await self._notify_about_pool_has_checked(dsn)
 ```
 
-**After (0.11.0):**
+**After (0.10.0):**
 
 ```python
 await self._health._notify_about_pool_has_checked(dsn)
@@ -354,7 +363,7 @@ for d in m.drivers:
     print(d.host, d.used)
 ```
 
-**After (0.11.0):**
+**After (0.10.0):**
 
 ```python
 m = pool_manager.metrics()

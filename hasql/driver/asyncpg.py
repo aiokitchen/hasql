@@ -52,7 +52,7 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
             if conn is not None:
                 addr, _ = conn._addr
                 AsyncpgDriver.cached_hosts[id(pool)] = addr
-            return AsyncpgDriver.cached_hosts[id(pool)]
+            return AsyncpgDriver.cached_hosts.get(id(pool), "unknown")
     else:
         def host(self, pool: asyncpg.Pool):
             addr, _ = pool._working_addr

@@ -49,7 +49,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
     ):
         if not issubclass(balancer_policy, AbstractBalancerPolicy):
             raise ValueError(
-                "balancer_policy must be a class BaseBalancerPolicy heir",
+                "balancer_policy must be a subclass of AbstractBalancerPolicy",
             )
 
         if pool_factory_kwargs is None:
@@ -310,13 +310,18 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         self._balancer = None
         await self._health.stop()
 
+        snapshot = list(self._unmanaged_connections.items())
+        self._unmanaged_connections.clear()
+
         release_tasks = []
-        for connection in self._unmanaged_connections:
-            release_tasks.append(self.release(connection))
+        for connection, pool in snapshot:
+            self._metrics.remove_connection(self.host(pool))
+            release_tasks.append(
+                self.release_to_pool(connection, pool),
+            )
 
         await asyncio.gather(*release_tasks, return_exceptions=True)
 
-        self._unmanaged_connections.clear()
         self.pool_state._master_pool_set.clear()
         self.pool_state._replica_pool_set.clear()
 

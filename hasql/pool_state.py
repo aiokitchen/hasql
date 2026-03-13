@@ -117,20 +117,22 @@ class PoolState(Generic[PoolT, ConnT]):
     # --- Pool waiting ---
 
     async def wait_for_master_pools(self) -> None:
-        if not self._master_pool_set:
-            async with self._master_cond:
-                await self._master_cond.wait()
+        async with self._master_cond:
+            await self._master_cond.wait_for(
+                lambda: bool(self._master_pool_set),
+            )
 
     async def wait_for_replica_pools(
         self,
         fallback_master: bool = False,
     ) -> None:
-        if not self._replica_pool_set:
-            if fallback_master:
-                await self.wait_for_master_pools()
-                return
-            async with self._replica_cond:
-                await self._replica_cond.wait()
+        if not self._replica_pool_set and fallback_master:
+            await self.wait_for_master_pools()
+            return
+        async with self._replica_cond:
+            await self._replica_cond.wait_for(
+                lambda: bool(self._replica_pool_set),
+            )
 
     async def wait_masters_ready(self, masters_count: int):
         def predicate():

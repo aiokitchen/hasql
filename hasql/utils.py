@@ -205,6 +205,7 @@ class Dsn:
         dbname: Optional[str] = None,
     ) -> "Dsn":
         params = {
+            "scheme": self._scheme,
             "netloc": netloc if netloc is not None else self._netloc,
             "user": user if user is not None else self._user,
             "password": password if password is not None else self._password,

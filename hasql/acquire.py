@@ -22,14 +22,14 @@ ConnT_co = TypeVar("ConnT_co", covariant=True)
 
 
 class AcquireContext(Protocol[ConnT_co]):
-    async def __aenter__(self) -> ConnT: ...
+    async def __aenter__(self) -> ConnT_co: ...
     async def __aexit__(
         self,
         exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> Optional[bool]: ...
-    def __await__(self) -> Generator[Any, None, ConnT]: ...
+    def __await__(self) -> Generator[Any, None, ConnT_co]: ...
 
 
 class TimeoutAcquireContext(Generic[ConnT]):
@@ -77,6 +77,9 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
         self.timeout = timeout
         self.kwargs = kwargs
         self.metrics = metrics
+        self._pool: Optional[PoolT] = None
+        self._conn: Optional[ConnT] = None
+        self._context: Optional[AcquireContext[ConnT]] = None
 
     def _deadline(self) -> float:
         return asyncio.get_running_loop().time() + self.timeout
@@ -144,6 +147,8 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
         return conn
 
     async def __aexit__(self, *exc):
+        if self._conn is None or self._pool is None or self._context is None:
+            return
         self.pool_manager.unregister_connection(self._conn)
         self.metrics.remove_connection(
             self.pool_manager.host(self._pool),

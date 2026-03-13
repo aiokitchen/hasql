@@ -33,7 +33,8 @@ class Psycopg3AcquireContext:
         self.done = True
         con = self.connection
         self.connection = None
-        await self.pool.putconn(con)
+        if con is not None:
+            await self.pool.putconn(con)
 
     def __await__(self):
         return self.pool.getconn(self.timeout).__await__()

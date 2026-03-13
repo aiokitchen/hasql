@@ -7,63 +7,57 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import QueuePool
 
-from hasql.base import BasePoolManager, TimeoutAcquireContext
+from hasql.abc import PoolDriver
+from hasql.acquire import TimeoutAcquireContext
 from hasql.metrics import DriverMetrics
+from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
 
 
-class PoolManager(BasePoolManager):
-    # TODO: _timeout is a smuggled kwarg key — consider returning a
-    #  (kwargs, timeout) tuple from _prepare_acquire_kwargs instead.
-    def _prepare_acquire_kwargs(
-        self,
-        kwargs: dict,
-        timeout: float,
-    ) -> dict:
-        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
-        prepared_kwargs["_timeout"] = timeout
-        return prepared_kwargs
+class AsyncSqlAlchemyDriver(PoolDriver[AsyncEngine, AsyncConnection]):
 
     def get_pool_freesize(self, pool: AsyncEngine):
         queue_pool: QueuePool = pool.sync_engine.pool
         return queue_pool.size() - queue_pool.checkedout()
 
-    def acquire_from_pool(self, pool: AsyncEngine, **kwargs):
-        timeout = kwargs.pop("_timeout", None)
+    def acquire_from_pool(
+        self, pool: AsyncEngine,
+        *, timeout=None, **kwargs,
+    ):
         ctx = pool.connect()
         if timeout is not None:
             return TimeoutAcquireContext(ctx, timeout)
         return ctx
 
-    async def release_to_pool(      # type: ignore
+    async def release_to_pool(
         self,
         connection: AsyncConnection,
-        _: AsyncEngine,
-        **kwargs
+        pool: AsyncEngine,
+        **kwargs,
     ):
         await connection.close()
 
-    async def _is_master(self, connection: AsyncConnection):
+    async def is_master(self, connection: AsyncConnection):
         result = await connection.scalar(
             sa.text("SHOW transaction_read_only"),
         ) == "off"
         await connection.execute(sa.text('COMMIT'))
         return result
 
-    async def _pool_factory(self, dsn: Dsn):
+    async def pool_factory(self, dsn: Dsn, **kwargs):
         d = str(dsn)
         if d.startswith('postgresql://'):
             d = d.replace('postgresql://', 'postgresql+asyncpg://', 1)
-        return create_async_engine(d, **self.pool_factory_kwargs)
+        return create_async_engine(d, **kwargs)
 
-    def _prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
+    def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
         kwargs["pool_size"] = kwargs.get("pool_size", 1) + 1
         return kwargs
 
-    async def _close(self, pool: AsyncEngine):
+    async def close_pool(self, pool: AsyncEngine):
         await pool.dispose()
 
-    async def _terminate(self, pool: AsyncEngine):
+    async def terminate_pool(self, pool: AsyncEngine):
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, pool.sync_engine.dispose)
 
@@ -73,7 +67,9 @@ class PoolManager(BasePoolManager):
     def host(self, pool: AsyncEngine):
         return pool.sync_engine.url.host
 
-    def _driver_metrics(self) -> Sequence[DriverMetrics]:
+    def driver_metrics(
+        self, pools: Sequence[Optional[AsyncEngine]],
+    ) -> Sequence[DriverMetrics]:
         return [
             DriverMetrics(
                 max=p.sync_engine.pool.size(),
@@ -82,9 +78,14 @@ class PoolManager(BasePoolManager):
                 used=p.sync_engine.pool.checkedout(),
                 host=p.sync_engine.url.host,
             )
-            for p in self.pools
+            for p in pools
             if p
         ]
+
+
+class PoolManager(BasePoolManager[AsyncEngine, AsyncConnection]):
+    def __init__(self, dsn, **kwargs):
+        super().__init__(dsn, driver=AsyncSqlAlchemyDriver(), **kwargs)
 
 
 def async_sessionmaker(
@@ -139,4 +140,4 @@ def async_sessionmaker(
     return create_async_session
 
 
-__all__ = ("PoolManager", "async_sessionmaker")
+__all__ = ("AsyncSqlAlchemyDriver", "PoolManager", "async_sessionmaker")

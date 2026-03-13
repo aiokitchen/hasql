@@ -2,7 +2,7 @@ import mock
 import pytest
 from aiopg import Connection
 
-from hasql.aiopg import PoolManager
+from hasql.driver.aiopg import PoolManager
 from hasql.metrics import DriverMetrics
 
 
@@ -71,12 +71,23 @@ async def test_driver_metrics(pool_manager, pg_dsn):
     ]
 
 
-def test_prepare_acquire_kwargs_sets_timeout():
+def test_acquire_from_pool_wraps_with_timeout():
+    from hasql.base import TimeoutAcquireContext
+    from hasql.driver.aiopg import AiopgDriver
+
     pool_manager = PoolManager.__new__(PoolManager)
-    assert pool_manager._prepare_acquire_kwargs(
-        {"some_kwarg": 1},
-        timeout=0.25,
-    ) == {
-        "some_kwarg": 1,
-        "_timeout": 0.25,
-    }
+    pool_manager._driver = AiopgDriver()
+    pool = mock.MagicMock()
+    ctx = pool_manager.acquire_from_pool(pool, timeout=0.25)
+    assert isinstance(ctx, TimeoutAcquireContext)
+
+
+def test_acquire_from_pool_no_timeout():
+    from hasql.base import TimeoutAcquireContext
+    from hasql.driver.aiopg import AiopgDriver
+
+    pool_manager = PoolManager.__new__(PoolManager)
+    pool_manager._driver = AiopgDriver()
+    pool = mock.MagicMock()
+    ctx = pool_manager.acquire_from_pool(pool)
+    assert not isinstance(ctx, TimeoutAcquireContext)

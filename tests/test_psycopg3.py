@@ -9,7 +9,7 @@ from psycopg import AsyncConnection
 from psycopg_pool import PoolTimeout, TooManyRequests
 
 from hasql.metrics import DriverMetrics
-from hasql.psycopg3 import PoolManager
+from hasql.driver.psycopg3 import PoolManager
 
 
 @pytest.fixture
@@ -131,15 +131,15 @@ async def test_acquire_with_queue_limit(queue_limited_pool_manager, pool_size):
     await waiter
 
 
-def test_prepare_acquire_kwargs_sets_timeout():
+def test_acquire_from_pool_passes_timeout():
+    from hasql.driver.psycopg3 import Psycopg3AcquireContext, Psycopg3Driver
+
     pool_manager = PoolManager.__new__(PoolManager)
-    assert pool_manager._prepare_acquire_kwargs(
-        {"row_factory": mock.ANY},
-        timeout=0.25,
-    ) == {
-        "row_factory": mock.ANY,
-        "timeout": 0.25,
-    }
+    pool_manager._driver = Psycopg3Driver()
+    pool = mock.MagicMock()
+    ctx = pool_manager.acquire_from_pool(pool, timeout=0.25)
+    assert isinstance(ctx, Psycopg3AcquireContext)
+    assert ctx.timeout == 0.25
 
 
 async def test_metrics(pool_manager):

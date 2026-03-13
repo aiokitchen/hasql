@@ -2,7 +2,7 @@ import mock
 import pytest
 from asyncpg import Connection
 
-from hasql.asyncpg import PoolManager
+from hasql.driver.asyncpg import PoolManager
 from hasql.metrics import DriverMetrics
 
 
@@ -60,12 +60,11 @@ async def test_metrics(pool_manager):
         ]
 
 
-def test_prepare_acquire_kwargs_sets_timeout():
+def test_acquire_from_pool_passes_timeout():
+    from hasql.driver.asyncpg import AsyncpgDriver
+
     pool_manager = PoolManager.__new__(PoolManager)
-    assert pool_manager._prepare_acquire_kwargs(
-        {"statement_cache_size": 0},
-        timeout=0.25,
-    ) == {
-        "statement_cache_size": 0,
-        "timeout": 0.25,
-    }
+    pool_manager._driver = AsyncpgDriver()
+    pool = mock.MagicMock()
+    pool_manager.acquire_from_pool(pool, timeout=0.25)
+    pool.acquire.assert_called_once_with(timeout=0.25)

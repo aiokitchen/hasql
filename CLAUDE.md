@@ -33,28 +33,57 @@ uv run tox -e py311 # Python 3.11
 
 **hasql** is a high-availability PostgreSQL connection management library that provides automatic master/replica detection and load balancing across multiple database hosts.
 
-### Core Components
+### Class Responsibilities
 
-1. **PoolState** (`hasql/pool_state.py`) - Manages pool state: master/replica sets, waiting/readiness, pool queries, and the stopwatch. Implements `PoolStateProvider` protocol used by balancer policies.
+**Call chain:** `BasePoolManager` → `PoolState` → `PoolDriver`. The manager never calls the driver directly.
 
-2. **BasePoolManager** (`hasql/pool_manager.py`) - Thin orchestrator that composes `PoolState`, owns the driver, health monitor, balancer, metrics, and acquire/release logic. Pool state is accessed via the public `pool_state` attribute.
+**PoolState** (`hasql/pool_state.py`) — owns the driver and all pool state.
+- **Driver gateway:** single point of contact with the driver. All driver operations (acquire, release, pool factory, close, terminate, is_master, host, stats, freesize) go through PoolState.
+- **Pool lifecycle:** creates pools (`pool_factory`), closes/terminates them, stores `pool_factory_kwargs`.
+- **Role state:** master/replica sets, role refresh (`refresh_pool_role`), set mutations.
+- **Readiness & waiting:** DSN ready events, conditions for master/replica availability.
+- **Pool queries:** freesize, response time (stopwatch), pool stats, host, connection status.
+- Implements `PoolStateProvider` protocol used by balancer policies.
 
-3. **Driver-Specific Pool Managers:**
+**BasePoolManager** (`hasql/pool_manager.py`) — thin orchestrator, owns no driver reference.
+- **Public API (8 methods/properties):** `acquire()`, `acquire_master()`, `acquire_replica()`, `close()`, `metrics()`, `ready()`, `wait_masters_ready()`, `available_pool_count`.
+- **Configuration:** timeouts, delays, fallback, master-as-replica weight (all private: `_acquire_timeout`, `_refresh_delay`, etc.).
+- **Connection tracking:** `_unmanaged_connections` registry, `_register_connection`/`_unregister_connection`.
+- **Balancer ownership:** creates and holds `_balancer` instance.
+- **Metrics aggregation:** combines `PoolState` data with `_unmanaged_connections` tracking.
+- **Lifecycle coordination:** `close()` orchestrates health stop, connection cleanup, pool shutdown.
+- **Pool state:** accessed via `_pool_state` (private). Commonly-used methods (`ready`, `wait_masters_ready`, `available_pool_count`) are proxied on the manager.
+
+**PoolHealthMonitor** (`hasql/health.py`) — background health checking.
+- Spawns one task per DSN: creates pool, acquires sys connection, calls `manager._periodic_pool_check`.
+- Uses `manager._pool_state` for pool operations (acquire, release, factory).
+- Uses `manager._closing`, `manager._refresh_timeout`, `manager._refresh_delay` for configuration.
+- Error recovery: removes unhealthy pools from sets, retries pool creation.
+
+**PoolDriver** (`hasql/abc.py`) — database driver interface.
+- Abstract methods for pool/connection operations. Implementations in `hasql/driver/`.
+- Never called directly by manager or health monitor — always through `PoolState`.
+
+**BalancerPolicy** (`hasql/balancer_policy/`) — pool selection strategies.
+- Depends on `PoolStateProvider` protocol (no import of manager).
+- Subclasses implement `_get_pool` to select from candidates.
+
+### Other Components
+
+1. **Driver-Specific Pool Managers** (`hasql/driver/`):
    - `hasql.aiopg.PoolManager` - aiopg driver support
    - `hasql.asyncpg.PoolManager` - asyncpg driver support
    - `hasql.psycopg3.PoolManager` - psycopg3 driver support
    - `hasql.asyncsqlalchemy.PoolManager` - SQLAlchemy async support
    - `hasql.aiopg_sa.PoolManager` - aiopg with SQLAlchemy support
 
-4. **Balancer Policies** (`hasql/balancer_policy/`) - Load balancing strategies (see details below)
-
-5. **Connection String Parsing** (`hasql/utils.py`) - Handles multi-host PostgreSQL connection strings with support for:
+2. **Connection String Parsing** (`hasql/utils.py`) - Handles multi-host PostgreSQL connection strings with support for:
    - Comma-separated hosts: `postgresql://db1,db2,db3/dbname`
    - Per-host ports: `postgresql://db1:1234,db2:5678/dbname`
    - Global port override: `postgresql://db1,db2:6432/dbname`
    - libpq-style connection strings
 
-6. **Metrics and Monitoring** (`hasql/metrics.py`) - Three-layer metrics model:
+3. **Metrics and Monitoring** (`hasql/metrics.py`) - Three-layer metrics model:
    - `PoolStats` — raw per-pool stats returned by `PoolDriver.pool_stats()` (min, max, idle, used, extra)
    - `PoolMetrics` — enriched per-pool metrics built by `BasePoolManager.metrics()`, adding role, healthy, response_time, in_flight, and driver-specific extras
    - `HasqlGauges` — point-in-time snapshot of manager state (master_count, replica_count, active_connections, closing, closed)
@@ -94,7 +123,7 @@ All balancer policies live in `hasql/balancer_policy/`. The module structure:
 - `_get_candidates(read_only, fallback_master, choose_master_as_replica)` — builds the list of eligible pools (replicas, master, or both)
 - `_get_pool(...)` — **abstract method**, the only thing subclasses must implement
 
-**Import architecture:** The circular import between `pool_manager` and `balancer_policy` is broken by the `PoolStateProvider` protocol in `pool_state.py`. Balancer policies depend on `PoolStateProvider` (direct import from `pool_state.py`, no `TYPE_CHECKING` needed). `BasePoolManager` passes its `pool_state` attribute (which implements `PoolStateProvider`) to the balancer constructor. Import graph (no cycles): `pool_state.py` → `utils.py`, `abc.py`; `balancer_policy/base.py` → `pool_state.py`; `pool_manager.py` → `pool_state.py`, `balancer_policy/`, `health.py`.
+**Import architecture:** The circular import between `pool_manager` and `balancer_policy` is broken by the `PoolStateProvider` protocol in `pool_state.py`. Balancer policies depend on `PoolStateProvider` (direct import from `pool_state.py`, no `TYPE_CHECKING` needed). `BasePoolManager` passes its `_pool_state` attribute (which implements `PoolStateProvider`) to the balancer constructor. Import graph (no cycles): `pool_state.py` → `utils.py`, `abc.py`, `acquire.py`, `metrics.py`; `balancer_policy/base.py` → `pool_state.py`; `pool_manager.py` → `pool_state.py`, `balancer_policy/`, `health.py`; `health.py` → `pool_manager.py` (TYPE_CHECKING only).
 
 **Policies:**
 

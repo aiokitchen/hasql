@@ -92,7 +92,7 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
 
     async def _get_pool(self, deadline: float) -> PoolT:
         async def get_pool() -> PoolT:
-            balancer = self.pool_manager.balancer
+            balancer = self.pool_manager._balancer
             if balancer is None:
                 raise RuntimeError("Pool manager is closed")
             with self.metrics.with_get_pool():
@@ -116,7 +116,7 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
         deadline = self._deadline()
         pool = await self._get_pool(deadline)
         remaining = self._remaining_timeout(deadline)
-        driver_ctx = self.pool_manager.acquire_from_pool(
+        driver_ctx = self.pool_manager._pool_state.acquire_from_pool(
             pool,
             timeout=remaining,
             **self.kwargs,
@@ -126,21 +126,23 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
     async def _acquire_connection(self) -> ConnT:
         pool, driver_ctx = await self._resolve_pool_and_acquire_context()
 
-        with self.metrics.with_acquire(self.pool_manager.host(pool)):
+        host = self.pool_manager._pool_state.host(pool)
+        with self.metrics.with_acquire(host):
             conn: ConnT = await driver_ctx
 
-        self.metrics.add_connection(self.pool_manager.host(pool))
-        self.pool_manager.register_connection(conn, pool)
+        self.metrics.add_connection(host)
+        self.pool_manager._register_connection(conn, pool)
         return conn
 
     async def __aenter__(self) -> ConnT:
         pool, driver_ctx = await self._resolve_pool_and_acquire_context()
 
-        with self.metrics.with_acquire(self.pool_manager.host(pool)):
+        host = self.pool_manager._pool_state.host(pool)
+        with self.metrics.with_acquire(host):
             conn: ConnT = await driver_ctx.__aenter__()
 
-        self.metrics.add_connection(self.pool_manager.host(pool))
-        self.pool_manager.register_connection(conn, pool)
+        self.metrics.add_connection(host)
+        self.pool_manager._register_connection(conn, pool)
         self._pool = pool
         self._conn = conn
         self._context = driver_ctx
@@ -149,9 +151,9 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
     async def __aexit__(self, *exc):
         if self._conn is None or self._pool is None or self._context is None:
             return
-        self.pool_manager.unregister_connection(self._conn)
+        self.pool_manager._unregister_connection(self._conn)
         self.metrics.remove_connection(
-            self.pool_manager.host(self._pool),
+            self.pool_manager._pool_state.host(self._pool),
         )
         await self._context.__aexit__(*exc)
 

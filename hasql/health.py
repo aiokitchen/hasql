@@ -20,7 +20,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
         self._manager = manager
         self._tasks: Optional[List[asyncio.Task]] = [
             asyncio.create_task(self._check_pool_task(index))
-            for index in range(len(manager.pool_state._dsn))
+            for index in range(len(manager._pool_state.dsn))
         ]
 
     @property
@@ -42,15 +42,15 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
     async def _check_pool_task(self, index: int):
         logger.debug("Starting pool task")
         manager = self._manager
-        pool_state = manager.pool_state
-        dsn = pool_state._dsn[index]
+        pool_state = manager._pool_state
+        dsn = pool_state.dsn[index]
         censored_dsn = str(dsn.with_(password="******"))
         pool = await self._wait_creating_pool(dsn)
-        pool_state._pools[index] = pool
+        pool_state.set_pool(index, pool)
 
         logger.debug("Setting dsn=%r event", censored_dsn)
         sys_connection: Optional[ConnT] = None
-        while not manager.closing:
+        while not manager._closing:
             try:
                 # Don't use async with — we need a custom timeout
                 logger.debug(
@@ -58,8 +58,8 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                     censored_dsn,
                 )
                 sys_connection = await asyncio.wait_for(
-                    manager.acquire_from_pool(pool),
-                    timeout=manager.refresh_timeout,
+                    pool_state.acquire_from_pool(pool),
+                    timeout=manager._refresh_timeout,
                 )
 
                 logger.debug("Checking dsn=%r", censored_dsn)
@@ -75,44 +75,41 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                     "Creating system connection failed for dsn=%r",
                     censored_dsn,
                 )
-                pool_state._remove_pool_from_master_set(pool, dsn)
-                pool_state._remove_pool_from_replica_set(pool, dsn)
+                pool_state.remove_pool_from_all_sets(pool, dsn)
             except asyncio.CancelledError as cancelled_error:
-                if manager.closing:
+                if manager._closing:
                     raise cancelled_error from None
                 logger.warning(
                     "Cancelled error for dsn=%r",
                     censored_dsn,
                     exc_info=True,
                 )
-                pool_state._remove_pool_from_master_set(pool, dsn)
-                pool_state._remove_pool_from_replica_set(pool, dsn)
+                pool_state.remove_pool_from_all_sets(pool, dsn)
             except Exception:
                 logger.warning(
                     "Database is not available with exception for dsn=%r",
                     censored_dsn,
                     exc_info=True,
                 )
-                pool_state._remove_pool_from_master_set(pool, dsn)
-                pool_state._remove_pool_from_replica_set(pool, dsn)
+                pool_state.remove_pool_from_all_sets(pool, dsn)
             finally:
                 if sys_connection is not None:
                     await self._safe_release_connection(
                         sys_connection, pool, censored_dsn,
                     )
                     sys_connection = None
-                await self._notify_about_pool_has_checked(dsn)
+                await pool_state.notify_pool_checked(dsn)
 
-            await asyncio.sleep(manager.refresh_delay)
+            await asyncio.sleep(manager._refresh_delay)
 
     async def _safe_release_connection(
         self, connection: ConnT, pool: PoolT, censored_dsn: str,
     ):
         manager = self._manager
         try:
-            await manager.release_to_pool(connection, pool)
+            await manager._pool_state.release_to_pool(connection, pool)
         except asyncio.CancelledError as cancelled_error:
-            if manager.closing:
+            if manager._closing:
                 raise cancelled_error from None
             logger.warning(
                 "Release connection to pool with "
@@ -130,11 +127,12 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
 
     async def _wait_creating_pool(self, dsn: Dsn) -> PoolT:
         manager = self._manager
-        while not manager.closing:
+        pool_state = manager._pool_state
+        while not manager._closing:
             try:
                 return await asyncio.wait_for(
-                    manager._pool_factory(dsn),
-                    timeout=manager.refresh_timeout,
+                    pool_state.pool_factory(dsn),
+                    timeout=manager._refresh_timeout,
                 )
             except Exception:
                 logger.warning(
@@ -142,13 +140,8 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                     dsn.with_(password="******"),
                     exc_info=True,
                 )
-                await asyncio.sleep(manager.refresh_delay)
+                await asyncio.sleep(manager._refresh_delay)
         raise asyncio.CancelledError("Pool manager is closing")
-
-    async def _notify_about_pool_has_checked(self, dsn: Dsn):
-        pool_state = self._manager.pool_state
-        async with pool_state._dsn_check_cond[dsn]:
-            pool_state._dsn_check_cond[dsn].notify_all()
 
 
 __all__ = ("PoolHealthMonitor",)

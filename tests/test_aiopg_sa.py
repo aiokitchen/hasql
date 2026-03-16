@@ -8,7 +8,7 @@ from hasql.driver.aiopg_sa import PoolManager
 async def pool_manager(pg_dsn):
     pg_pool = PoolManager(dsn=pg_dsn, fallback_master=True)
     try:
-        await pg_pool.pool_state.ready()
+        await pg_pool._pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()

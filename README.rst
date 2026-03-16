@@ -200,10 +200,7 @@ For ``asyncpgsa``
         pool = PoolManager(multihost_dsn)
 
         # Waiting for 1 master and 1 replica will be available
-        await asyncio.gather(
-            pool.wait_masters_ready(1),
-            pool.wait_replicas_ready(1)
-        )
+        await pool.ready(masters_count=1, replicas_count=1)
         return pool
 
 
@@ -278,27 +275,6 @@ or
         pool = await create_pool(multihost_dsn)
         async with pool.acquire_replica() as connection:
             ...
-
-Without context manager (really not recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    async def do_something():
-        pool = await create_pool(multihost_dsn)
-        connection = await pool.acquire(read_only=False)
-        await pool.release(connection)
-
-or more useful
-
-.. code-block:: python
-
-    async def do_something():
-        pool = await create_pool(multihost_dsn)
-        try:
-            connection = await pool.acquire(read_only=False)
-        finally:
-            await pool.release(connection)
 
 How it works?
 =============
@@ -520,7 +496,7 @@ Use the helper from ``example/otlp/common.py``:
     provider = setup_meter_provider(export_interval_ms=10_000)
 
     pool = PoolManager(dsn, fallback_master=True)
-    await pool.pool_state.ready()
+    await pool.ready()
 
     # Registers observable gauges — OTel calls metrics()
     # automatically at each export interval
@@ -730,86 +706,53 @@ Overview
           database-specific pool operations. Driver-specific
           ``PoolManager`` classes provide this automatically.
 
-        * ``acquire_timeout: Union[int, float]`` - Default timeout (in seconds)
-          for connection operations. 1 sec by default.
+        * ``acquire_timeout: Union[int, float]`` - Default timeout
+          (in seconds) for connection operations. 1 sec by default.
 
         * ``refresh_delay: Union[int, float]`` - Delay time (in seconds)
           between host polls. 1 sec by default.
 
-        * ``refresh_timeout: Union[int, float]`` - Timeout (in seconds) for
-          trying to connect and get the host role. 30 sec by default.
+        * ``refresh_timeout: Union[int, float]`` - Timeout (in seconds)
+          for trying to connect and get the host role. 30 sec by
+          default.
 
-        * ``fallback_master: bool`` - Use connections from master if replicas
-          are missing. False by default.
+        * ``fallback_master: bool`` - Use connections from master if
+          replicas are missing. False by default.
 
-        * ``master_as_replica_weight: float`` - Probability of using the master
-          as a replica (from 0. to 1.; 0. - master is not used as a replica;
-          1. - master can be used as a replica).
+        * ``master_as_replica_weight: float`` - Probability of using
+          the master as a replica (from 0. to 1.; 0. - master is not
+          used as a replica; 1. - master can be used as a replica).
 
         * ``balancer_policy: type`` - Connection pool balancing policy
-          (`hasql.balancer_policy.GreedyBalancerPolicy`,
-          `hasql.balancer_policy.RandomWeightedBalancerPolicy` or
-          `hasql.balancer_policy.RoundRobinBalancerPolicy`).
+          (``GreedyBalancerPolicy``,
+          ``RandomWeightedBalancerPolicy`` or
+          ``RoundRobinBalancerPolicy``).
 
-        * ``stopwatch_window_size: int`` - Window size for calculating the
-          median response time of each pool.
+        * ``stopwatch_window_size: int`` - Window size for calculating
+          the median response time of each pool.
 
-        * ``pool_factory_kwargs: Optional[dict]`` - Connection pool creation
-          parameters that are passed to pool factory.
-
-    * ``driver`` - Property that returns the ``PoolDriver`` instance
-      used by this pool manager.
-
-    * ``get_pool_freesize(pool)``
-      Getting the number of free connections in the connection pool. Returns
-      number of free connections in the connection pool.
-
-        * ``pool`` - Pool for which you to be getting the number of
-          free connections.
-
-    * coroutine async-with ``acquire_from_pool(pool, *, timeout, **kwargs)``
-      Acquire a connection from pool. Returns connection to the database.
-
-        * ``pool`` - Pool from which you to be acquiring the connection.
-
-        * ``timeout: Optional[float]`` - Timeout (in seconds) for
-          the acquire operation. None by default.
-
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
-
-    * coroutine ``release_to_pool(connection, pool, **kwargs)``
-      A coroutine that reverts connection conn to pool for future recycling.
-
-        * ``connection`` - Connection to be released.
-
-        * ``pool`` - Pool to which you are returning the connection.
-
-        * ``kwargs`` - Arguments to be passed to the pool release() method.
-
-    * ``is_connection_closed(connection)``
-      Returns True if connection is closed.
-
-    * ``get_last_response_time(pool)``
-      Returns database host last response time (in seconds).
+        * ``pool_factory_kwargs: Optional[dict]`` - Connection pool
+          creation parameters that are passed to pool factory.
 
     * coroutine async-with
       ``acquire(read_only, fallback_master, timeout, **kwargs)``
       Acquire a connection from free pool.
 
-        * ``readonly: bool`` - ``True`` if need return connection to replica,
-          ``False`` - to master. False by default.
+        * ``readonly: bool`` - ``True`` if need return connection to
+          replica, ``False`` - to master. False by default.
 
-        * ``fallback_master: Optional[bool]`` - Use connections from master
-          if replicas are missing. If None, then the default value is used.
+        * ``fallback_master: Optional[bool]`` - Use connections from
+          master if replicas are missing. If None, then the default
+          value is used.
 
-        * ``master_as_replica_weight: float`` - Probability of using the master
-          as a replica (from 0. to 1.; 0. - master is not used as a replica;
-          1. - master can be used as a replica).
+        * ``master_as_replica_weight: float`` - Probability of using
+          the master as a replica (from 0. to 1.).
 
-        * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
-          operations.
+        * ``timeout: Union[int, float]`` - Timeout (in seconds) for
+          connection operations.
 
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
+        * ``kwargs`` - Arguments to be passed to the pool acquire()
+          method.
 
     * coroutine async-with ``acquire_master(timeout, **kwargs)``
       Acquire a connection from free master pool.
@@ -818,58 +761,48 @@ Overview
         * ``timeout: Union[int, float]`` - Timeout (in seconds) for
           connection operations.
 
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
+        * ``kwargs`` - Arguments to be passed to the pool acquire()
+          method.
 
     * coroutine async-with
       ``acquire_replica(fallback_master, timeout, **kwargs)``
-      Acquire a connection from free master pool.
+      Acquire a connection from free replica pool.
       Equivalent ``acquire(read_only=True)``
 
-        * ``fallback_master: Optional[bool]`` - Use connections from master if
-          replicas are missing. If None, then the default value is used.
+        * ``fallback_master: Optional[bool]`` - Use connections from
+          master if replicas are missing. If None, then the default
+          value is used.
 
-        * ``master_as_replica_weight: float`` - Probability of using the master
-          as a replica (from 0. to 1.; 0. - master is not used as a replica;
-          1. - master can be used as a replica).
+        * ``master_as_replica_weight: float`` - Probability of using
+          the master as a replica (from 0. to 1.).
 
-        * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
-          operations.
+        * ``timeout: Union[int, float]`` - Timeout (in seconds) for
+          connection operations.
 
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
-
-    * coroutine ``release(connection, **kwargs)``
-      A coroutine that reverts connection conn to pool for future recycling.
-
-        * ``connection`` - Connection to be released.
-        * ``kwargs`` - Arguments to be passed to the pool release() method.
+        * ``kwargs`` - Arguments to be passed to the pool acquire()
+          method.
 
     * coroutine ``close()``
-      Close pool. Mark all pool connections to be closed on getting back to
-      pool. Closed pool doesn’t allow to acquire new connections.
+      Close pool. Mark all pool connections to be closed on getting
+      back to pool. Closed pool doesn’t allow to acquire new
+      connections.
 
-    * coroutine ``terminate()``
-      Terminate pool. Close pool with instantly closing all acquired
-      connections also.
-
-    * coroutine ``wait_next_pool_check(timeout)``
-      Waiting for the next step to update host roles.
+    * ``metrics()``
+      Returns a ``Metrics`` snapshot of the entire cluster state.
 
     * coroutine ``ready(masters_count, replicas_count, timeout)``
-      Waiting for a connection to the database hosts. If masters_count is
-      ``None`` and replicas_count is None, then connection to all hosts
-      is expected.
+      Waiting for a connection to the database hosts. If
+      masters_count is ``None`` and replicas_count is None, then
+      connection to all hosts is expected.
 
-        * ``masters_count: Optional[int]`` - Minimum number of master hosts.
-          ``None`` by default.
+        * ``masters_count: Optional[int]`` - Minimum number of master
+          hosts. ``None`` by default.
 
-        * ``replicas_count: Optional[int]`` - Minimum number of replica hosts.
-          ``None`` by default.
+        * ``replicas_count: Optional[int]`` - Minimum number of
+          replica hosts. ``None`` by default.
 
-        * ``timeout: Union[int, float]`` - Timeout for database connections.
-          10 seconds by default.
-
-    * coroutine ``wait_all_ready()```
-      Waiting to connect to all database hosts.
+        * ``timeout: Union[int, float]`` - Timeout for database
+          connections. 10 seconds by default.
 
     * coroutine ``wait_masters_ready(masters_count)``
       Waiting for connection to the specified number of
@@ -877,39 +810,9 @@ Overview
 
         * ``masters_count: int`` - Minimum number of master hosts.
 
-    * coroutine `wait_replicas_ready(replicas_count)`
-      Waiting for connection to the specified number of
-      database replica servers.
-
-        * ``replicas_count: int`` - Minimum number of replica hosts.
-
-    * coroutine ``get_pool(read_only, fallback_master)``
-      Returns connection pool with the maximum number of free connections.
-
-        * ``readonly: bool`` - True if need return replica pool,
-          ``False`` - master pool.
-
-        * ``fallback_master: Optional[bool]`` - Returns master pool if
-          replicas are missing. False by default.
-
-    * coroutine ``get_master_pools()``
-      Returns a list of all master pools.
-
-    * coroutine ``get_replica_pools(fallback_master)``
-      Returns a list of all replica pools.
-
-        * ``fallback_master: Optional[bool]`` - Returns a list of all master
-          pools if replicas are missing. False by default.
-
-    * ``pool_is_master(pool)``
-      Returns True if connection is master.
-
-    * ``pool_is_replica(pool)``
-      Returns True if connection is replica.
-
-    * ``register_connection(connection, pool)``
-      Match connection with the pool from which it was taken.
-      It is necessary for the release() method to work correctly.
+    * ``available_pool_count``
+      Property returning the total number of pools with a known role
+      (masters + replicas).
 
 * ``hasql.aiopg.PoolManager`` (driver: ``AiopgDriver``)
 

@@ -35,25 +35,24 @@ async def test_acquire_without_context(pool_manager):
 
 
 async def test_close(pool_manager):
-    aiopg_pool = await pool_manager.balancer.get_pool(read_only=False)
+    aiopg_pool = await pool_manager._balancer.get_pool(read_only=False)
     await pool_manager.close()
     assert aiopg_pool.closed
 
 
 async def test_release(pool_manager):
-    aiopg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
-    conn = await pool_manager.acquire_master()
-    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 9
-    await pool_manager.release(conn)
-    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
+    aiopg_pool = await pool_manager._balancer.get_pool(read_only=False)
+    assert pool_manager._pool_state.get_pool_freesize(aiopg_pool) == 10
+    async with pool_manager.acquire_master() as _conn:
+        assert pool_manager._pool_state.get_pool_freesize(aiopg_pool) == 9
+    assert pool_manager._pool_state.get_pool_freesize(aiopg_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
     async with pool_manager.acquire_master() as conn:
-        assert not pool_manager.is_connection_closed(conn)
+        assert not pool_manager._pool_state.is_connection_closed(conn)
         await conn.close()
-        assert pool_manager.is_connection_closed(conn)
+        assert pool_manager._pool_state.is_connection_closed(conn)
 
 
 async def test_driver_context_metrics(pool_manager, pg_dsn):
@@ -71,36 +70,43 @@ async def test_driver_context_metrics(pool_manager, pg_dsn):
 
 
 async def test_driver_metrics(pool_manager, pg_dsn):
-    _ = await pool_manager.acquire_master()
-    pools = pool_manager.metrics().pools
-    assert len(pools) == 1
-    p = pools[0]
-    assert p.max == 11
-    assert p.min == 11
-    assert p.idle == 9
-    assert p.used == 2
-    assert p.role == "master"
-    assert p.healthy is True
-    assert p.in_flight == 1
+    async with pool_manager.acquire_master():
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 11
+        assert p.idle == 9
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1
 
 
 def test_acquire_from_pool_wraps_with_timeout():
     from hasql.base import TimeoutAcquireContext
     from hasql.driver.aiopg import AiopgDriver
 
+    from hasql.pool_state import PoolState
+
     pool_manager = PoolManager.__new__(PoolManager)
-    pool_manager._driver = AiopgDriver()
+    pool_state = PoolState.__new__(PoolState)
+    pool_state._driver = AiopgDriver()
+    pool_manager._pool_state = pool_state
     pool = mock.MagicMock()
-    ctx = pool_manager.acquire_from_pool(pool, timeout=0.25)
+    ctx = pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
     assert isinstance(ctx, TimeoutAcquireContext)
 
 
 def test_acquire_from_pool_no_timeout():
     from hasql.base import TimeoutAcquireContext
     from hasql.driver.aiopg import AiopgDriver
+    from hasql.pool_state import PoolState
 
     pool_manager = PoolManager.__new__(PoolManager)
-    pool_manager._driver = AiopgDriver()
+    pool_state = PoolState.__new__(PoolState)
+    pool_state._driver = AiopgDriver()
+    pool_manager._pool_state = pool_state
     pool = mock.MagicMock()
-    ctx = pool_manager.acquire_from_pool(pool)
+    ctx = pool_manager._pool_state.acquire_from_pool(pool)
     assert not isinstance(ctx, TimeoutAcquireContext)

@@ -12,21 +12,28 @@ def test_acquire_from_pool_wraps_with_timeout():
     from hasql.base import TimeoutAcquireContext
     from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
 
+    from hasql.pool_state import PoolState
+
     pool_manager = PoolManager.__new__(PoolManager)
-    pool_manager._driver = AsyncSqlAlchemyDriver()
+    pool_state = PoolState.__new__(PoolState)
+    pool_state._driver = AsyncSqlAlchemyDriver()
+    pool_manager._pool_state = pool_state
     pool = mock.MagicMock()
-    ctx = pool_manager.acquire_from_pool(pool, timeout=0.25)
+    ctx = pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
     assert isinstance(ctx, TimeoutAcquireContext)
 
 
 def test_acquire_from_pool_no_timeout():
     from hasql.base import TimeoutAcquireContext
     from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
+    from hasql.pool_state import PoolState
 
     pool_manager = PoolManager.__new__(PoolManager)
-    pool_manager._driver = AsyncSqlAlchemyDriver()
+    pool_state = PoolState.__new__(PoolState)
+    pool_state._driver = AsyncSqlAlchemyDriver()
+    pool_manager._pool_state = pool_state
     pool = mock.MagicMock()
-    ctx = pool_manager.acquire_from_pool(pool)
+    ctx = pool_manager._pool_state.acquire_from_pool(pool)
     assert not isinstance(ctx, TimeoutAcquireContext)
 
 
@@ -38,7 +45,7 @@ async def pool_manager(pg_dsn):
         pool_factory_kwargs={"pool_size": 10},
     )
     try:
-        await pg_pool.pool_state.ready()
+        await pg_pool._pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -57,7 +64,7 @@ async def test_acquire_without_context(pool_manager):
 
 
 async def test_close(pool_manager):
-    sqlalchemy_pool: AsyncEngine = await pool_manager.balancer.get_pool(
+    sqlalchemy_pool: AsyncEngine = await pool_manager._balancer.get_pool(
         read_only=False,
     )
     assert sqlalchemy_pool.sync_engine.pool.checkedout() > 0
@@ -65,29 +72,19 @@ async def test_close(pool_manager):
     assert sqlalchemy_pool.sync_engine.pool.checkedout() == 0
 
 
-async def test_terminate(pool_manager):
-    sqlalchemy_pool: AsyncEngine = await pool_manager.balancer.get_pool(
-        read_only=False,
-    )
-    assert sqlalchemy_pool.sync_engine.pool.overflow() == -10
-    await pool_manager.terminate()
-    assert sqlalchemy_pool.sync_engine.pool.overflow() == -11
-
-
 async def test_release(pool_manager):
-    sqlalchemy_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.pool_state.get_pool_freesize(sqlalchemy_pool) == 10
-    conn = await pool_manager.acquire_master()
-    assert pool_manager.pool_state.get_pool_freesize(sqlalchemy_pool) == 9
-    await pool_manager.release(conn)
-    assert pool_manager.pool_state.get_pool_freesize(sqlalchemy_pool) == 10
+    sqlalchemy_pool = await pool_manager._balancer.get_pool(read_only=False)
+    assert pool_manager._pool_state.get_pool_freesize(sqlalchemy_pool) == 10
+    async with pool_manager.acquire_master() as _conn:
+        assert pool_manager._pool_state.get_pool_freesize(sqlalchemy_pool) == 9
+    assert pool_manager._pool_state.get_pool_freesize(sqlalchemy_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
     async with pool_manager.acquire_master() as conn:
-        assert not pool_manager.is_connection_closed(conn)
+        assert not pool_manager._pool_state.is_connection_closed(conn)
         await conn.close()
-        assert pool_manager.is_connection_closed(conn)
+        assert pool_manager._pool_state.is_connection_closed(conn)
 
 
 async def test_metrics(pool_manager):

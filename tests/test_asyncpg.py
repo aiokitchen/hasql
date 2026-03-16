@@ -14,7 +14,7 @@ async def pool_manager(pg_dsn):
         pool_factory_kwargs={"min_size": 10, "max_size": 10},
     )
     try:
-        await pg_pool.pool_state.ready()
+        await pg_pool._pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -33,24 +33,17 @@ async def test_acquire_without_context(pool_manager):
 
 
 async def test_close(pool_manager):
-    asyncpg_pool = await pool_manager.balancer.get_pool(read_only=False)
+    asyncpg_pool = await pool_manager._balancer.get_pool(read_only=False)
     await pool_manager.close()
     assert asyncpg_pool._closed
 
 
-async def test_terminate(pool_manager):
-    asyncpg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    await pool_manager.terminate()
-    assert asyncpg_pool._closed
-
-
 async def test_release(pool_manager):
-    asyncpg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.pool_state.get_pool_freesize(asyncpg_pool) == 10
-    conn = await pool_manager.acquire_master()
-    assert pool_manager.pool_state.get_pool_freesize(asyncpg_pool) == 9
-    await pool_manager.release(conn)
-    assert pool_manager.pool_state.get_pool_freesize(asyncpg_pool) == 10
+    asyncpg_pool = await pool_manager._balancer.get_pool(read_only=False)
+    assert pool_manager._pool_state.get_pool_freesize(asyncpg_pool) == 10
+    async with pool_manager.acquire_master() as _conn:
+        assert pool_manager._pool_state.get_pool_freesize(asyncpg_pool) == 9
+    assert pool_manager._pool_state.get_pool_freesize(asyncpg_pool) == 10
 
 
 async def test_metrics(pool_manager):
@@ -70,10 +63,14 @@ async def test_metrics(pool_manager):
 def test_acquire_from_pool_passes_timeout():
     from hasql.driver.asyncpg import AsyncpgDriver
 
+    from hasql.pool_state import PoolState
+
     pool_manager = PoolManager.__new__(PoolManager)
-    pool_manager._driver = AsyncpgDriver()
+    pool_state = PoolState.__new__(PoolState)
+    pool_state._driver = AsyncpgDriver()
+    pool_manager._pool_state = pool_state
     pool = mock.MagicMock()
-    pool_manager.acquire_from_pool(pool, timeout=0.25)
+    pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
     pool.acquire.assert_called_once_with(timeout=0.25)
 
 

@@ -26,6 +26,24 @@ class FakeAcquireContext:
         return self.__aenter__().__await__()
 
 
+def _make_mock_pool_manager(pool, inner_ctx):
+    """Create a MagicMock that mimics the new private API."""
+    pm = MagicMock()
+
+    pool_state = MagicMock()
+    pool_state.host.return_value = "test-host:5432"
+    pool_state.acquire_from_pool.return_value = inner_ctx
+    pm._pool_state = pool_state
+
+    pm._balancer = MagicMock()
+    pm._balancer.get_pool = AsyncMock(return_value=pool)
+
+    pm._register_connection = MagicMock()
+    pm._unregister_connection = MagicMock()
+
+    return pm
+
+
 async def test_timeout_acquire_context_aenter():
     conn = object()
     ctx = TimeoutAcquireContext(FakeAcquireContext(conn), timeout=1.0)
@@ -70,11 +88,7 @@ async def test_pool_acquire_context_aexit_removes_connection():
     pool = object()
     inner_ctx = FakeAcquireContext()
 
-    pm = MagicMock()
-    pm.host.return_value = "test-host:5432"
-    pm.balancer.get_pool = AsyncMock(return_value=pool)
-    pm.acquire_from_pool.return_value = inner_ctx
-    pm.register_connection = MagicMock()
+    pm = _make_mock_pool_manager(pool, inner_ctx)
 
     ctx = PoolAcquireContext(
         pool_manager=pm,
@@ -99,11 +113,7 @@ async def test_pool_acquire_context_await_registers_connection():
     conn = object()
     inner_ctx = FakeAcquireContext(conn)
 
-    pm = MagicMock()
-    pm.host.return_value = "test-host:5432"
-    pm.balancer.get_pool = AsyncMock(return_value=pool)
-    pm.acquire_from_pool.return_value = inner_ctx
-    pm.register_connection = MagicMock()
+    pm = _make_mock_pool_manager(pool, inner_ctx)
 
     ctx = PoolAcquireContext(
         pool_manager=pm,
@@ -116,7 +126,7 @@ async def test_pool_acquire_context_await_registers_connection():
 
     result = await ctx
     assert result is conn
-    pm.register_connection.assert_called_once_with(conn, pool)
+    pm._register_connection.assert_called_once_with(conn, pool)
     assert metrics._add_connections.get("test-host:5432") == 1
 
 
@@ -162,11 +172,7 @@ async def test_pool_acquire_context_kwargs_passed_through():
     pool = object()
     inner_ctx = FakeAcquireContext()
 
-    pm = MagicMock()
-    pm.host.return_value = "test-host:5432"
-    pm.balancer.get_pool = AsyncMock(return_value=pool)
-    pm.acquire_from_pool.return_value = inner_ctx
-    pm.register_connection = MagicMock()
+    pm = _make_mock_pool_manager(pool, inner_ctx)
 
     ctx = PoolAcquireContext(
         pool_manager=pm,
@@ -179,5 +185,5 @@ async def test_pool_acquire_context_kwargs_passed_through():
     )
 
     await ctx
-    call_kwargs = pm.acquire_from_pool.call_args
+    call_kwargs = pm._pool_state.acquire_from_pool.call_args
     assert call_kwargs.kwargs.get("custom_kwarg") == "value"

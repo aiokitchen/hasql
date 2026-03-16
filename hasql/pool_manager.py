@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from types import MappingProxyType
 from typing import (
     Dict,
     Generic,
@@ -9,7 +8,7 @@ from typing import (
 )
 
 from .abc import PoolDriver
-from .acquire import AcquireContext, PoolAcquireContext
+from .acquire import PoolAcquireContext
 from .balancer_policy.base import AbstractBalancerPolicy
 from .balancer_policy.greedy import GreedyBalancerPolicy
 from .constants import (
@@ -52,22 +51,15 @@ class BasePoolManager(Generic[PoolT, ConnT]):
                 "balancer_policy must be a subclass of AbstractBalancerPolicy",
             )
 
-        if pool_factory_kwargs is None:
-            pool_factory_kwargs = {}
-
-        self._driver = driver
-        self._pool_factory_kwargs = MappingProxyType(
-            self._driver.prepare_pool_factory_kwargs(pool_factory_kwargs),
-        )
-
-        self.pool_state: PoolState[PoolT, ConnT] = PoolState(
+        self._pool_state: PoolState[PoolT, ConnT] = PoolState(
             dsn_list=split_dsn(dsn),
             driver=driver,
             stopwatch_window_size=stopwatch_window_size,
+            pool_factory_kwargs=pool_factory_kwargs,
         )
 
         self._balancer: Optional[AbstractBalancerPolicy[PoolT]] = (
-            balancer_policy(self.pool_state)
+            balancer_policy(self._pool_state)
         )
         self._health: PoolHealthMonitor[PoolT, ConnT] = PoolHealthMonitor(self)
 
@@ -81,82 +73,36 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         self._closing = False
         self._closed = False
 
-    @property
-    def driver(self) -> PoolDriver[PoolT, ConnT]:
-        return self._driver
+    # --- Public proxy methods/properties for pool_state ---
 
-    @property
-    def refresh_delay(self):
-        return self._refresh_delay
+    async def wait_masters_ready(self, masters_count: int) -> None:
+        await self._pool_state.wait_masters_ready(masters_count)
 
-    @property
-    def refresh_timeout(self):
-        return self._refresh_timeout
-
-    @property
-    def pool_factory_kwargs(self):
-        return self._pool_factory_kwargs
-
-    @property
-    def balancer(self) -> Optional[AbstractBalancerPolicy[PoolT]]:
-        return self._balancer
-
-    @property
-    def closing(self) -> bool:
-        return self._closing
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-    def acquire_from_pool(
+    async def ready(
         self,
-        pool: PoolT,
-        *,
-        timeout: Optional[float] = None,
-        **kwargs,
-    ) -> AcquireContext[ConnT]:
-        return self._driver.acquire_from_pool(
-            pool,
+        masters_count: Optional[int] = None,
+        replicas_count: Optional[int] = None,
+        timeout: int = 10,
+    ) -> None:
+        await self._pool_state.ready(
+            masters_count=masters_count,
+            replicas_count=replicas_count,
             timeout=timeout,
-            **kwargs,
         )
 
-    async def release_to_pool(
-        self,
-        connection: ConnT,
-        pool: PoolT,
-        **kwargs,
-    ):
-        await self._driver.release_to_pool(connection, pool, **kwargs)
+    @property
+    def available_pool_count(self) -> int:
+        return self._pool_state.available_pool_count
 
-    async def _is_master(self, connection: ConnT) -> bool:
-        return await self._driver.is_master(connection)
-
-    async def _pool_factory(self, dsn: Dsn) -> PoolT:
-        return await self._driver.pool_factory(dsn, **self._pool_factory_kwargs)
-
-    async def _close(self, pool: PoolT):
-        await self._driver.close_pool(pool)
-
-    async def _terminate(self, pool: PoolT) -> None:
-        await self._driver.terminate_pool(pool)
-
-    def is_connection_closed(self, connection: ConnT) -> bool:
-        return self._driver.is_connection_closed(connection)
-
-    def host(self, pool: PoolT) -> str:
-        return self._driver.host(pool)
-
-    # --- End driver proxy methods ---
+    # --- Metrics ---
 
     def metrics(self) -> Metrics:
-        pool_state = self.pool_state
+        pool_state = self._pool_state
         pool_metrics = []
-        for pool in pool_state._pools:
+        for pool in pool_state.pools:
             if pool is None:
                 continue
-            stats = self._driver.pool_stats(pool)
+            stats = pool_state.pool_stats(pool)
 
             if pool_state.pool_is_master(pool):
                 role = "master"
@@ -170,7 +116,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             )
 
             pool_metrics.append(PoolMetrics(
-                host=self._driver.host(pool),
+                host=pool_state.host(pool),
                 role=role,
                 healthy=role is not None,
                 min=stats.min,
@@ -196,6 +142,8 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             hasql=self._metrics.metrics(),
             gauges=gauges,
         )
+
+    # --- Acquire API ---
 
     def acquire(
         self,
@@ -265,44 +213,28 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             **kwargs,
         )
 
-    async def release(self, connection: ConnT, **kwargs):
-        if connection not in self._unmanaged_connections:
-            raise ValueError(
-                "Pool.release() received invalid connection: "
-                f"{connection!r} is not a member of this pool",
-            )
+    # --- Connection tracking (internal) ---
 
-        pool = self._unmanaged_connections.pop(connection)
-        self._metrics.remove_connection(self.host(pool))
-        await self.release_to_pool(connection, pool, **kwargs)
-
-    def register_connection(self, connection: ConnT, pool: PoolT):
+    def _register_connection(self, connection: ConnT, pool: PoolT):
         self._unmanaged_connections[connection] = pool
 
-    def unregister_connection(self, connection: ConnT) -> None:
+    def _unregister_connection(self, connection: ConnT) -> None:
         self._unmanaged_connections.pop(connection, None)
+
+    # --- Lifecycle ---
 
     async def close(self):
         self._closing = True
         await self._clear()
+        pool_state = self._pool_state
         await asyncio.gather(
             *[
-                self._close(pool)
-                for pool in self.pool_state._pools
+                pool_state.close_pool(pool)
+                for pool in pool_state.pools
                 if pool is not None
             ],
             return_exceptions=True,
         )
-        self._closing = False
-        self._closed = True
-
-    async def terminate(self):
-        self._closing = True
-        await self._clear()
-        for pool in self.pool_state._pools:
-            if pool is None:
-                continue
-            await self._terminate(pool)
         self._closing = False
         self._closed = True
 
@@ -315,15 +247,14 @@ class BasePoolManager(Generic[PoolT, ConnT]):
 
         release_tasks = []
         for connection, pool in snapshot:
-            self._metrics.remove_connection(self.host(pool))
+            self._metrics.remove_connection(self._pool_state.host(pool))
             release_tasks.append(
-                self.release_to_pool(connection, pool),
+                self._pool_state.release_to_pool(connection, pool),
             )
 
         await asyncio.gather(*release_tasks, return_exceptions=True)
 
-        self.pool_state._master_pool_set.clear()
-        self.pool_state._replica_pool_set.clear()
+        self._pool_state.clear_sets()
 
     async def _periodic_pool_check(
         self,
@@ -334,42 +265,24 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         while not self._closing:
             try:
                 await asyncio.wait_for(
-                    self._refresh_pool_role(pool, dsn, sys_connection),
+                    self._pool_state.refresh_pool_role(
+                        pool, dsn, sys_connection,
+                    ),
                     timeout=self._refresh_timeout,
                 )
-                await self._health._notify_about_pool_has_checked(dsn)
+                await self._pool_state.notify_pool_checked(dsn)
             except asyncio.TimeoutError:
                 logger.warning(
                     "Periodic pool check failed for dsn=%s",
                     dsn.with_(password="******"),
                 )
-                self.pool_state._remove_pool_from_master_set(pool, dsn)
-                self.pool_state._remove_pool_from_replica_set(pool, dsn)
-                await self._health._notify_about_pool_has_checked(dsn)
+                self._pool_state.remove_pool_from_all_sets(pool, dsn)
+                await self._pool_state.notify_pool_checked(dsn)
 
             await asyncio.sleep(self._refresh_delay)
 
-    async def _refresh_pool_role(
-        self,
-        pool: PoolT,
-        dsn: Dsn,
-        sys_connection: ConnT,
-    ):
-        with self.pool_state._stopwatch(pool):
-            is_master = await self._is_master(sys_connection)
-        if is_master:
-            await self.pool_state._add_pool_to_master_set(pool, dsn)
-            self.pool_state._remove_pool_from_replica_set(pool, dsn)
-        else:
-            await self.pool_state._add_pool_to_replica_set(pool, dsn)
-            self.pool_state._remove_pool_from_master_set(pool, dsn)
-        self.pool_state._dsn_ready_event[dsn].set()
-
-    def __iter__(self):
-        return iter(self.pool_state)
-
     async def __aenter__(self):
-        await self.pool_state.ready()
+        await self._pool_state.ready()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

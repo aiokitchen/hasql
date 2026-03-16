@@ -4,10 +4,11 @@
 
 | What you do today | Action needed |
 |---|---|
-| `from hasql.aiopg import PoolManager` (or asyncpg, psycopg3, etc.) | **Update required** — import from `hasql.driver.*` |
+| `from hasql.aiopg import PoolManager` (or asyncpg, psycopg3, etc.) | **Update** — import from `hasql.driver.*` |
 | `from hasql.base import BasePoolManager, TimeoutAcquireContext` | **None** — re-exports preserved |
 | Subclass `BasePoolManager` to add a custom driver | **Rewrite** — extract driver into `PoolDriver` subclass |
 | Override `_prepare_acquire_kwargs` | **Rewrite** — use explicit `timeout` parameter |
+| `pool.ready()`, `pool.get_master_pools()`, etc. | **Update** — `ready()` and `wait_masters_ready()` are proxied on manager; others via `pool._pool_state.*` |
 | Patch `_is_master` / `_pool_factory` in tests | **None** — proxy methods still patchable |
 | Access `_refresh_role_tasks` | **Update** — use `_health.tasks` |
 | Call `_notify_about_pool_has_checked` | **Update** — use `_health._notify_about_pool_has_checked` |
@@ -61,33 +62,6 @@ Driver import paths (`hasql.aiopg`, `hasql.asyncpg`, etc.) have moved to
 
 ## No changes needed
 
-### Using built-in PoolManagers
-
-Driver-specific `PoolManager` classes have moved from `hasql.<driver>` to
-`hasql.driver.<driver>`. Update your imports:
-
-```python
-# Old (0.9.0)                              # New (0.10.0)
-from hasql.aiopg import PoolManager        # from hasql.driver.aiopg import PoolManager
-from hasql.asyncpg import PoolManager      # from hasql.driver.asyncpg import PoolManager
-from hasql.psycopg3 import PoolManager     # from hasql.driver.psycopg3 import PoolManager
-from hasql.asyncsqlalchemy import PoolManager  # from hasql.driver.asyncsqlalchemy import PoolManager
-from hasql.aiopg_sa import PoolManager     # from hasql.driver.aiopg_sa import PoolManager
-from hasql.asyncpgsa import PoolManager    # from hasql.driver.asyncpgsa import PoolManager
-```
-
-Usage remains the same after updating the import:
-
-```python
-from hasql.driver.asyncpg import PoolManager
-
-pool = PoolManager("postgresql://master,replica/db")
-await pool.ready()
-
-async with pool.acquire_master() as conn:
-    ...
-```
-
 ### Importing from `hasql.base`
 
 All re-exports are preserved:
@@ -115,8 +89,8 @@ Proxy methods on `BasePoolManager` still exist, so `mock.patch` continues to wor
 with mock.patch.object(pool_manager, "_is_master", ...):
     ...
 
-# Also still works
-with mock.patch("hasql.aiopg.PoolManager._is_master", ...):
+# Also still works (use the new import path)
+with mock.patch("hasql.driver.aiopg.PoolManager._is_master", ...):
     ...
 ```
 
@@ -124,7 +98,74 @@ with mock.patch("hasql.aiopg.PoolManager._is_master", ...):
 
 ## Migration required
 
-### 1. Custom BasePoolManager subclasses
+### 1. Driver import paths
+
+Driver-specific `PoolManager` classes have moved from `hasql.<driver>` to
+`hasql.driver.<driver>`. The old modules (`hasql.aiopg`, `hasql.asyncpg`, etc.)
+no longer exist.
+
+```python
+# Old (0.9.0)                              # New (0.10.0)
+from hasql.aiopg import PoolManager        # from hasql.driver.aiopg import PoolManager
+from hasql.asyncpg import PoolManager      # from hasql.driver.asyncpg import PoolManager
+from hasql.psycopg3 import PoolManager     # from hasql.driver.psycopg3 import PoolManager
+from hasql.asyncsqlalchemy import PoolManager  # from hasql.driver.asyncsqlalchemy import PoolManager
+from hasql.aiopg_sa import PoolManager     # from hasql.driver.aiopg_sa import PoolManager
+from hasql.asyncpgsa import PoolManager    # from hasql.driver.asyncpgsa import PoolManager
+```
+
+Usage remains the same after updating the import:
+
+```python
+from hasql.driver.asyncpg import PoolManager
+
+async with PoolManager("postgresql://master,replica/db") as pool:
+    async with pool.acquire_master() as conn:
+        ...
+```
+
+### 2. Pool state methods
+
+`ready()` and `wait_masters_ready()` are proxied directly on the manager.
+Other pool-state methods are accessible via `pool._pool_state`.
+
+| Old (0.9.0) | New (0.10.0) |
+|---|---|
+| `pool.ready()` | `pool.ready()` or `async with pool:` |
+| `pool.wait_masters_ready(n)` | `pool.wait_masters_ready(n)` |
+| `pool.available_pool_count` | `pool.available_pool_count` |
+| `pool.get_master_pools()` | `pool._pool_state.get_master_pools()` |
+| `pool.get_replica_pools()` | `pool._pool_state.get_replica_pools()` |
+| `pool.wait_all_ready()` | `pool._pool_state.wait_all_ready()` |
+| `pool.wait_replicas_ready(n)` | `pool._pool_state.wait_replicas_ready(n)` |
+| `pool.wait_next_pool_check()` | `pool._pool_state.wait_next_pool_check()` |
+
+**Before (0.9.0):**
+
+```python
+pool = PoolManager("postgresql://master,replica/db")
+await pool.ready()
+
+masters = await pool.get_master_pools()
+```
+
+**After (0.10.0):**
+
+```python
+pool = PoolManager("postgresql://master,replica/db")
+await pool.ready()
+
+masters = await pool._pool_state.get_master_pools()
+```
+
+Or use the context manager, which calls `ready()` automatically:
+
+```python
+async with PoolManager("postgresql://master,replica/db") as pool:
+    ...
+```
+
+### 3. Custom BasePoolManager subclasses
 
 **Before (0.9.0):** You subclassed `BasePoolManager` and implemented abstract methods.
 
@@ -257,7 +298,7 @@ Key differences:
 - **`acquire_from_pool` has explicit `timeout`:** Timeout is a dedicated
   keyword argument, not smuggled through `**kwargs`.
 
-### 2. `_prepare_acquire_kwargs` removed
+### 4. `_prepare_acquire_kwargs` removed
 
 **Before (0.9.0):** Drivers overrode `_prepare_acquire_kwargs` to smuggle the
 timeout into `**kwargs` under a driver-specific key (e.g. `_timeout`, `timeout`):
@@ -291,7 +332,7 @@ class MyDriver(PoolDriver[MyPool, MyConnection]):
         return ctx
 ```
 
-### 3. `_refresh_role_tasks` → `_health.tasks`
+### 5. `_refresh_role_tasks` → `_health.tasks`
 
 **Before (0.9.0):**
 
@@ -311,7 +352,7 @@ Health monitoring logic (background tasks, pool creation retry, role checking)
 has been extracted into `PoolHealthMonitor` (`hasql.health`), accessible via
 `pool_manager._health`.
 
-### 4. `_notify_about_pool_has_checked` → `_health._notify_about_pool_has_checked`
+### 6. `_notify_about_pool_has_checked` → `_health._notify_about_pool_has_checked`
 
 **Before (0.9.0):**
 
@@ -325,16 +366,30 @@ await self._notify_about_pool_has_checked(dsn)
 await self._health._notify_about_pool_has_checked(dsn)
 ```
 
-### 5. Accessing the driver instance
+### 7. Removed public methods and properties
 
-The driver is available via a property on the pool manager:
+The following have been removed from `BasePoolManager`'s public API in 0.10.0:
 
-```python
-pool = PoolManager("postgresql://master,replica/db")
-driver = pool.driver  # PoolDriver instance
-```
+| Removed | Replacement |
+|---|---|
+| `pool.driver` | `pool._pool_state.driver` |
+| `pool.refresh_delay` | Internal `pool._refresh_delay` |
+| `pool.refresh_timeout` | Internal `pool._refresh_timeout` |
+| `pool.pool_factory_kwargs` | `pool._pool_state.pool_factory_kwargs` |
+| `pool.balancer` | Internal `pool._balancer` |
+| `pool.closing` | Internal `pool._closing` |
+| `pool.closed` | Internal `pool._closed` |
+| `pool.release(conn)` | Use context managers (`async with pool.acquire_master()`) |
+| `pool.terminate()` | Use `pool.close()` |
+| `pool.host(p)` | `pool._pool_state.host(p)` |
+| `pool.is_connection_closed(c)` | `pool._pool_state.is_connection_closed(c)` |
+| `pool.acquire_from_pool(p)` | `pool._pool_state.acquire_from_pool(p)` |
+| `pool.release_to_pool(c, p)` | `pool._pool_state.release_to_pool(c, p)` |
+| `pool.register_connection(c, p)` | Internal `pool._register_connection(c, p)` |
+| `pool.unregister_connection(c)` | Internal `pool._unregister_connection(c)` |
+| `iter(pool)` | `iter(pool._pool_state)` |
 
-### 6. Metrics: `PoolMetrics` replaces `DriverMetrics`
+### 8. Metrics: `PoolMetrics` replaces `DriverMetrics`
 
 The old `Metrics.drivers` field returned a flat list of `DriverMetrics` with only
 pool-level counters (`min`, `max`, `idle`, `used`, `host`). The new `Metrics.pools`
@@ -373,7 +428,7 @@ for p in m.pools:
 
 The old `m.drivers` property still works but emits a `DeprecationWarning`.
 
-### 7. New `Metrics.gauges` field
+### 9. New `Metrics.gauges` field
 
 `Metrics` now includes a `gauges: HasqlGauges` field — a point-in-time snapshot
 of the pool manager state:
@@ -395,7 +450,7 @@ print(m.gauges.master_count, m.gauges.replica_count)
 print(m.gauges.active_connections)
 ```
 
-### 8. Driver-specific `extra` data
+### 10. Driver-specific `extra` data
 
 Drivers now surface rich introspection data via `PoolStats.extra`, which flows
 through to `PoolMetrics.extra`:
@@ -442,7 +497,12 @@ async def test_my_driver():
 ### Pool state extraction
 
 Pool state management has been extracted from `BasePoolManager` into a dedicated
-`PoolState` class (`hasql/pool_state.py`), accessible via the public `pool_state`
-attribute. Balancer policies now depend on the `PoolStateProvider` protocol instead
+`PoolState` class (`hasql/pool_state.py`), accessible via the private `_pool_state`
+attribute. The most commonly used methods (`ready()`, `wait_masters_ready()`,
+`available_pool_count`) are proxied directly on the manager. See
+[section 2](#2-pool-state-methods) for the full list.
+
+Balancer policies now depend on the `PoolStateProvider` protocol instead
 of `BasePoolManager` directly. This breaks the circular import between
-`pool_manager` and `balancer_policy`.
+`pool_manager` and `balancer_policy`, and makes custom balancer policies
+independently testable.

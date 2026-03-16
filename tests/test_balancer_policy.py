@@ -112,9 +112,9 @@ async def test_get_pool_write_with_master_as_replica_weight_raises(
 ):
     pool_manager = await make_pool_manager(balancer_policy)
     async with timeout(1):
-        await pool_manager.pool_state.ready()
+        await pool_manager._pool_state.ready()
     with pytest.raises(ValueError, match="master_as_replica_weight"):
-        await pool_manager.balancer.get_pool(
+        await pool_manager._balancer.get_pool(
             read_only=False,
             master_as_replica_weight=0.5,
         )
@@ -167,7 +167,7 @@ async def test_round_robin_master_as_replica(make_pool_manager):
         replicas_count=0,
     )
     async with timeout(1):
-        await pool_manager.pool_state.ready()
+        await pool_manager._pool_state.ready()
 
     async with pool_manager.acquire_replica(
         master_as_replica_weight=1.0,
@@ -183,10 +183,10 @@ async def test_round_robin_waits_for_master_when_not_ready(
         replicas_count=0,
     )
     async with timeout(2):
-        await pool_manager.pool_state.ready()
+        await pool_manager._pool_state.ready()
 
     # Shut down the master so master_pool_count drops to 0
-    ps = pool_manager.pool_state
+    ps = pool_manager._pool_state
     master_pool: TestPool = (await ps.get_master_pools())[0]
     master_pool.shutdown()
 
@@ -216,10 +216,10 @@ async def test_round_robin_waits_for_replica_when_not_ready(
         replicas_count=2,
     )
     async with timeout(2):
-        await pool_manager.pool_state.ready()
+        await pool_manager._pool_state.ready()
 
     # Shut down all replicas so replica_pool_count drops to 0
-    ps = pool_manager.pool_state
+    ps = pool_manager._pool_state
     replica_pools = [
         pool
         for pool in ps.pools
@@ -229,8 +229,8 @@ async def test_round_robin_waits_for_replica_when_not_ready(
         rp.shutdown()
 
     # Wait for health monitor to detect shutdowns
-    await pool_manager.pool_state.wait_next_pool_check()
-    assert pool_manager.pool_state.replica_pool_count == 0
+    await pool_manager._pool_state.wait_next_pool_check()
+    assert pool_manager._pool_state.replica_pool_count == 0
 
     # Bring replicas back after a short delay
     async def bring_replicas_back():
@@ -254,16 +254,16 @@ async def test_round_robin_fallback_master_waits_when_master_not_ready(
         replicas_count=0,
     )
     async with timeout(2):
-        await pool_manager.pool_state.ready()
+        await pool_manager._pool_state.ready()
 
     # Shut down the master so both master and replica counts are 0
-    ps = pool_manager.pool_state
+    ps = pool_manager._pool_state
     master_pool: TestPool = (await ps.get_master_pools())[0]
     master_pool.shutdown()
 
-    await pool_manager.pool_state.wait_next_pool_check()
-    assert pool_manager.pool_state.master_pool_count == 0
-    assert pool_manager.pool_state.replica_pool_count == 0
+    await pool_manager._pool_state.wait_next_pool_check()
+    assert pool_manager._pool_state.master_pool_count == 0
+    assert pool_manager._pool_state.replica_pool_count == 0
 
     # Bring master back after a short delay
     async def bring_master_back():
@@ -291,9 +291,9 @@ async def test_round_robin_master_with_fallback_and_no_replicas(
         replicas_count=0,
     )
     async with timeout(1):
-        await pool_manager.pool_state.ready()
+        await pool_manager._pool_state.ready()
 
-    assert pool_manager.pool_state.replica_pool_count == 0
+    assert pool_manager._pool_state.replica_pool_count == 0
 
     # Acquiring master should work even when fallback_master
     # is set and there are no replicas

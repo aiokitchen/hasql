@@ -25,7 +25,7 @@ async def pool_manager(pg_dsn, pool_size):
         pool_factory_kwargs={"min_size": pool_size, "max_size": pool_size},
     )
     try:
-        await pg_pool.pool_state.ready()
+        await pg_pool._pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -48,25 +48,24 @@ async def test_acquire_without_context(pool_manager):
 
 
 async def test_close(pool_manager):
-    aiopg_pool = await pool_manager.balancer.get_pool(read_only=False)
+    aiopg_pool = await pool_manager._balancer.get_pool(read_only=False)
     await pool_manager.close()
     assert aiopg_pool.closed
 
 
 async def test_release(pool_manager):
-    aiopg_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
-    conn = await pool_manager.acquire_master()
-    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 9
-    await pool_manager.release(conn)
-    assert pool_manager.pool_state.get_pool_freesize(aiopg_pool) == 10
+    aiopg_pool = await pool_manager._balancer.get_pool(read_only=False)
+    assert pool_manager._pool_state.get_pool_freesize(aiopg_pool) == 10
+    async with pool_manager.acquire_master() as _conn:
+        assert pool_manager._pool_state.get_pool_freesize(aiopg_pool) == 9
+    assert pool_manager._pool_state.get_pool_freesize(aiopg_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
     async with pool_manager.acquire_master() as conn:
-        assert not pool_manager.is_connection_closed(conn)
+        assert not pool_manager._pool_state.is_connection_closed(conn)
         await conn.close()
-        assert pool_manager.is_connection_closed(conn)
+        assert pool_manager._pool_state.is_connection_closed(conn)
 
 
 async def test_acquire_with_timeout_context(pool_manager, pool_size):
@@ -78,11 +77,13 @@ async def test_acquire_with_timeout_context(pool_manager, pool_size):
         await pool_manager.acquire_master()
 
     for conn in conns:
-        await pool_manager.release(conn)
+        pool = pool_manager._unmanaged_connections.pop(conn, None)
+        if pool is not None:
+            await pool_manager._pool_state.release_to_pool(conn, pool)
     conns.clear()
 
-    for pool in pool_manager.pool_state.pools:
-        assert pool_manager.pool_state.get_pool_freesize(pool) == pool_size
+    for pool in pool_manager._pool_state.pools:
+        assert pool_manager._pool_state.get_pool_freesize(pool) == pool_size
 
     for _ in range(pool_size):
         async with pool_manager.acquire_master() as conn:
@@ -102,7 +103,7 @@ async def queue_limited_pool_manager(pg_dsn, pool_size):
         },
     )
     try:
-        await pg_pool.pool_state.ready()
+        await pg_pool._pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -116,8 +117,8 @@ async def test_acquire_with_queue_limit(queue_limited_pool_manager, pool_size):
             )
 
         async def wait_for_connection():
-            conn = await queue_limited_pool_manager.acquire_master()
-            await queue_limited_pool_manager.release(conn)
+            async with queue_limited_pool_manager.acquire_master():
+                pass
 
         waiter = asyncio.create_task(wait_for_connection())
         await asyncio.sleep(0.1)
@@ -133,10 +134,14 @@ async def test_acquire_with_queue_limit(queue_limited_pool_manager, pool_size):
 def test_acquire_from_pool_passes_timeout():
     from hasql.driver.psycopg3 import Psycopg3AcquireContext, Psycopg3Driver
 
+    from hasql.pool_state import PoolState
+
     pool_manager = PoolManager.__new__(PoolManager)
-    pool_manager._driver = Psycopg3Driver()
+    pool_state = PoolState.__new__(PoolState)
+    pool_state._driver = Psycopg3Driver()
+    pool_manager._pool_state = pool_state
     pool = mock.MagicMock()
-    ctx = pool_manager.acquire_from_pool(pool, timeout=0.25)
+    ctx = pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
     assert isinstance(ctx, Psycopg3AcquireContext)
     assert ctx.timeout == 0.25
 

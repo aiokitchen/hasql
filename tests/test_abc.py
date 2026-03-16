@@ -35,14 +35,14 @@ def test_test_driver_is_pool_driver():
     assert isinstance(driver, PoolDriver)
 
 
-async def test_pool_manager_has_driver_property():
-    """BasePoolManager exposes driver via property."""
+async def test_pool_manager_has_driver_via_pool_state():
+    """BasePoolManager exposes driver via _pool_state."""
     from tests.mocks import TestPoolManager
 
     manager = TestPoolManager(
         "postgresql://test:test@master:5432/test",
     )
     try:
-        assert isinstance(manager.driver, PoolDriver)
+        assert isinstance(manager._pool_state.driver, PoolDriver)
     finally:
         await manager.close()

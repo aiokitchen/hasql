@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from itertools import chain
+from types import MappingProxyType
 from typing import (
     DefaultDict,
     Generic,
@@ -15,6 +16,8 @@ from typing import (
 )
 
 from .abc import PoolDriver
+from .acquire import AcquireContext
+from .metrics import PoolStats
 from .utils import Dsn, Stopwatch
 
 logger = logging.getLogger(__name__)
@@ -36,8 +39,8 @@ class PoolStateProvider(Protocol[PoolT]):
 
 
 class PoolState(Generic[PoolT, ConnT]):
-    """Manages pool state: master/replica sets, waiting, readiness,
-    and pool queries."""
+    """Owns the driver and all pool state: master/replica sets,
+    pool lifecycle, connection operations, waiting, and readiness."""
 
     _dsn_ready_event: DefaultDict[Dsn, asyncio.Event]
     _dsn_check_cond: DefaultDict[Dsn, asyncio.Condition]
@@ -49,8 +52,14 @@ class PoolState(Generic[PoolT, ConnT]):
         dsn_list: List[Dsn],
         driver: PoolDriver[PoolT, ConnT],
         stopwatch_window_size: int,
+        pool_factory_kwargs: Optional[dict] = None,
     ):
         self._driver = driver
+        self._pool_factory_kwargs: MappingProxyType = MappingProxyType(
+            self._driver.prepare_pool_factory_kwargs(
+                pool_factory_kwargs if pool_factory_kwargs is not None else {},
+            ),
+        )
         self._dsn = dsn_list
         self._pools: List[Optional[PoolT]] = [None] * len(dsn_list)
         self._dsn_ready_event = defaultdict(asyncio.Event)
@@ -66,12 +75,20 @@ class PoolState(Generic[PoolT, ConnT]):
     # --- Properties ---
 
     @property
+    def driver(self) -> PoolDriver[PoolT, ConnT]:
+        return self._driver
+
+    @property
     def dsn(self) -> List[Dsn]:
         return self._dsn
 
     @property
     def pools(self) -> Sequence[Optional[PoolT]]:
         return tuple(self._pools)
+
+    @property
+    def pool_factory_kwargs(self) -> MappingProxyType:
+        return self._pool_factory_kwargs
 
     @property
     def master_pool_count(self) -> int:
@@ -98,6 +115,43 @@ class PoolState(Generic[PoolT, ConnT]):
 
     def get_last_response_time(self, pool: PoolT) -> Optional[float]:
         return self._stopwatch.get_time(pool)
+
+    # --- Driver operations ---
+
+    def acquire_from_pool(
+        self,
+        pool: PoolT,
+        *,
+        timeout: Optional[float] = None,
+        **kwargs,
+    ) -> AcquireContext[ConnT]:
+        return self._driver.acquire_from_pool(pool, timeout=timeout, **kwargs)
+
+    async def release_to_pool(
+        self,
+        connection: ConnT,
+        pool: PoolT,
+        **kwargs,
+    ):
+        await self._driver.release_to_pool(connection, pool, **kwargs)
+
+    async def pool_factory(self, dsn: Dsn) -> PoolT:
+        return await self._driver.pool_factory(dsn, **self._pool_factory_kwargs)
+
+    async def close_pool(self, pool: PoolT):
+        await self._driver.close_pool(pool)
+
+    async def terminate_pool(self, pool: PoolT):
+        await self._driver.terminate_pool(pool)
+
+    def is_connection_closed(self, connection: ConnT) -> bool:
+        return self._driver.is_connection_closed(connection)
+
+    def host(self, pool: PoolT) -> str:
+        return self._driver.host(pool)
+
+    def pool_stats(self, pool: PoolT) -> PoolStats:
+        return self._driver.pool_stats(pool)
 
     # --- Pool retrieval (async, waits for availability) ---
 
@@ -195,7 +249,39 @@ class PoolState(Generic[PoolT, ConnT]):
             for _ in range(2):
                 await self._dsn_check_cond[dsn].wait()
 
-    # --- Pool state mutations (used by health monitor via BasePoolManager) ---
+    # --- Pool role refresh ---
+
+    async def refresh_pool_role(
+        self, pool: PoolT, dsn: Dsn, sys_connection: ConnT,
+    ):
+        with self._stopwatch(pool):
+            is_master = await self._driver.is_master(sys_connection)
+        if is_master:
+            await self._add_pool_to_master_set(pool, dsn)
+            self._remove_pool_from_replica_set(pool, dsn)
+        else:
+            await self._add_pool_to_replica_set(pool, dsn)
+            self._remove_pool_from_master_set(pool, dsn)
+        self._dsn_ready_event[dsn].set()
+
+    def remove_pool_from_all_sets(self, pool: PoolT, dsn: Dsn):
+        self._remove_pool_from_master_set(pool, dsn)
+        self._remove_pool_from_replica_set(pool, dsn)
+
+    def clear_sets(self):
+        self._master_pool_set.clear()
+        self._replica_pool_set.clear()
+
+    # --- Pool registry ---
+
+    def set_pool(self, index: int, pool: PoolT):
+        self._pools[index] = pool
+
+    async def notify_pool_checked(self, dsn: Dsn):
+        async with self._dsn_check_cond[dsn]:
+            self._dsn_check_cond[dsn].notify_all()
+
+    # --- Pool state mutations ---
 
     async def _add_pool_to_master_set(self, pool: PoolT, dsn: Dsn):
         if pool in self._master_pool_set:

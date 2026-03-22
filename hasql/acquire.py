@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import AbstractAsyncContextManager
 from types import TracebackType
 from typing import (
@@ -13,7 +13,8 @@ from typing import (
 from .metrics import CalculateMetrics
 
 if TYPE_CHECKING:
-    from .pool_manager import BasePoolManager
+    from .balancer_policy.base import AbstractBalancerPolicy
+    from .pool_state import PoolState
 
 PoolT = TypeVar("PoolT")
 ConnT = TypeVar("ConnT")
@@ -64,7 +65,10 @@ class PoolAcquireContext(
 ):
     def __init__(
         self,
-        pool_manager: "BasePoolManager[PoolT, ConnT]",
+        pool_state: "PoolState[PoolT, ConnT]",
+        balancer: "AbstractBalancerPolicy[PoolT]",
+        register_connection: Callable[[ConnT, PoolT], None],
+        unregister_connection: Callable[[ConnT], None],
         read_only: bool,
         master_as_replica_weight: float | None,
         timeout: float,
@@ -72,19 +76,22 @@ class PoolAcquireContext(
         fallback_master: bool = False,
         **kwargs,
     ):
-        self.pool_manager = pool_manager
-        self.read_only = read_only
-        self.fallback_master = fallback_master
-        self.master_as_replica_weight = master_as_replica_weight
-        self.timeout = timeout
-        self.kwargs = kwargs
-        self.metrics = metrics
+        self._pool_state = pool_state
+        self._balancer = balancer
+        self._register_connection = register_connection
+        self._unregister_connection = unregister_connection
+        self._read_only = read_only
+        self._fallback_master = fallback_master
+        self._master_as_replica_weight = master_as_replica_weight
+        self._timeout = timeout
+        self._kwargs = kwargs
+        self._metrics = metrics
         self._pool: PoolT | None = None
         self._conn: ConnT | None = None
         self._context: AcquireContext[ConnT] | None = None
 
     def _deadline(self) -> float:
-        return asyncio.get_running_loop().time() + self.timeout
+        return asyncio.get_running_loop().time() + self._timeout
 
     def _remaining_timeout(self, deadline: float) -> float:
         remaining_timeout = deadline - asyncio.get_running_loop().time()
@@ -94,14 +101,11 @@ class PoolAcquireContext(
 
     async def _get_pool(self, deadline: float) -> PoolT:
         async def get_pool() -> PoolT:
-            balancer = self.pool_manager._balancer
-            if balancer is None:
-                raise RuntimeError("Pool manager is closed")
-            with self.metrics.with_get_pool():
-                pool = await balancer.get_pool(
-                    read_only=self.read_only,
-                    fallback_master=self.fallback_master,
-                    master_as_replica_weight=self.master_as_replica_weight,
+            with self._metrics.with_get_pool():
+                pool = await self._balancer.get_pool(
+                    read_only=self._read_only,
+                    fallback_master=self._fallback_master,
+                    master_as_replica_weight=self._master_as_replica_weight,
                 )
             if pool is None:
                 raise RuntimeError("No available pool")
@@ -118,38 +122,38 @@ class PoolAcquireContext(
         deadline = self._deadline()
         pool = await self._get_pool(deadline)
         remaining = self._remaining_timeout(deadline)
-        driver_ctx = self.pool_manager._pool_state.acquire_from_pool(
+        driver_ctx = self._pool_state.acquire_from_pool(
             pool,
             timeout=remaining,
-            **self.kwargs,
+            **self._kwargs,
         )
         return pool, driver_ctx
 
     async def _acquire_connection(self) -> ConnT:
         pool, driver_ctx = await self._resolve_pool_and_acquire_context()
 
-        host = self.pool_manager._pool_state.host(pool)
-        with self.metrics.with_acquire(host):
+        host = self._pool_state.host(pool)
+        with self._metrics.with_acquire(host):
             conn: ConnT = await driver_ctx
 
         try:
-            self.metrics.add_connection(host)
-            self.pool_manager._register_connection(conn, pool)
+            self._metrics.add_connection(host)
+            self._register_connection(conn, pool)
         except BaseException:
-            await self.pool_manager._pool_state.release_to_pool(conn, pool)
+            await self._pool_state.release_to_pool(conn, pool)
             raise
         return conn
 
     async def __aenter__(self) -> ConnT:
         pool, driver_ctx = await self._resolve_pool_and_acquire_context()
 
-        host = self.pool_manager._pool_state.host(pool)
-        with self.metrics.with_acquire(host):
+        host = self._pool_state.host(pool)
+        with self._metrics.with_acquire(host):
             conn: ConnT = await driver_ctx.__aenter__()
 
         try:
-            self.metrics.add_connection(host)
-            self.pool_manager._register_connection(conn, pool)
+            self._metrics.add_connection(host)
+            self._register_connection(conn, pool)
         except BaseException:
             await driver_ctx.__aexit__(None, None, None)
             raise
@@ -162,9 +166,9 @@ class PoolAcquireContext(
     async def __aexit__(self, *exc):
         if self._conn is None or self._pool is None or self._context is None:
             return
-        self.pool_manager._unregister_connection(self._conn)
-        self.metrics.remove_connection(
-            self.pool_manager._pool_state.host(self._pool),
+        self._unregister_connection(self._conn)
+        self._metrics.remove_connection(
+            self._pool_state.host(self._pool),
         )
         await self._context.__aexit__(*exc)
 

@@ -337,7 +337,7 @@ async def test_check_pool_task_cancelled_error_non_closing():
         assert pool_manager._pool_state.master_pool_count == 1
 
         with patch.object(
-            pool_manager._pool_state._driver,
+            pool_manager._pool_state.driver,
             'is_master',
             AsyncMock(side_effect=asyncio.CancelledError()),
         ):

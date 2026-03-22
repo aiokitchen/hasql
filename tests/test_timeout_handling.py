@@ -99,9 +99,12 @@ async def wait_until(predicate, timeout: float = 1.0):
 
 
 async def test_acquire_timeout_uses_shared_budget():
-    pool_manager = RecordingPoolManager(pool_delay=0.05, acquire_delay=1.0)
+    recording = RecordingPoolManager(pool_delay=0.05, acquire_delay=1.0)
     context = PoolAcquireContext(
-        pool_manager=pool_manager,
+        pool_state=recording._pool_state,
+        balancer=recording._balancer,
+        register_connection=recording._register_connection,
+        unregister_connection=lambda conn: None,
         read_only=False,
         fallback_master=False,
         master_as_replica_weight=None,
@@ -115,8 +118,8 @@ async def test_acquire_timeout_uses_shared_budget():
 
     elapsed = asyncio.get_running_loop().time() - start
     assert elapsed < 0.2
-    assert pool_manager.acquire_timeout is not None
-    assert 0 < pool_manager.acquire_timeout < 0.1
+    assert recording.acquire_timeout is not None
+    assert 0 < recording.acquire_timeout < 0.1
 
 
 async def test_refresh_timeout_removes_pool_from_available_set():

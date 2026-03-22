@@ -21,7 +21,7 @@ class AiopgDriver(PoolDriver[aiopg.Pool, aiopg.Connection]):
         return ctx
 
     async def release_to_pool(self, connection, pool, **kwargs):
-        return await pool.release(connection, **kwargs)
+        await pool.release(connection, **kwargs)
 
     async def is_master(self, connection):
         cursor = await connection.cursor()

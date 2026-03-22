@@ -223,7 +223,7 @@ class PoolState(Generic[PoolT, ConnT]):
         if replicas_count is not None and replicas_count < 0:
             raise ValueError("replicas_count shouldn't be negative")
 
-        if masters_count is None or replicas_count is None:
+        if masters_count is None:
             await asyncio.wait_for(self.wait_all_ready(), timeout=timeout)
             return
 

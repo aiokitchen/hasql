@@ -55,7 +55,7 @@ class Psycopg3Driver(PoolDriver[AsyncConnectionPool, AsyncConnection]):
         pool: AsyncConnectionPool,
         **kwargs,
     ):
-        return await pool.putconn(connection)
+        await pool.putconn(connection)
 
     async def is_master(self, connection: AsyncConnection):
         async with connection.cursor() as cur:

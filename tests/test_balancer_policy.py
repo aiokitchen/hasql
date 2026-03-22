@@ -135,16 +135,14 @@ def test_random_weighted_compute_weights_none_times():
     assert weights[0] == pytest.approx(weights[1])
 
 
-def test_random_weighted_compute_weights_all_none_produces_uniform():
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 10])
+def test_random_weighted_compute_weights_all_none_produces_uniform(n):
     # When all response times are None (e.g. at startup before any health
     # checks), weights should be uniform and all positive.
-    for n in (1, 2, 3, 5, 10):
-        weights = RandomWeightedBalancerPolicy._compute_weights(
-            [None] * n,
-        )
-        assert len(weights) == n
-        assert all(w > 0 for w in weights)
-        assert all(w == pytest.approx(weights[0]) for w in weights)
+    weights = RandomWeightedBalancerPolicy._compute_weights([None] * n)
+    assert len(weights) == n
+    assert all(w > 0 for w in weights)
+    assert all(w == pytest.approx(weights[0]) for w in weights)
 
 
 def test_random_weighted_compute_weights_all_zero_produces_uniform():

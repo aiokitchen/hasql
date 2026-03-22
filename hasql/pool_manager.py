@@ -177,8 +177,14 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         if timeout is None:
             timeout = self._acquire_timeout
 
-        ctx = PoolAcquireContext(
-            pool_manager=self,
+        if self._balancer is None:
+            raise RuntimeError("Pool manager is closed")
+
+        return PoolAcquireContext(
+            pool_state=self._pool_state,
+            balancer=self._balancer,
+            register_connection=self._register_connection,
+            unregister_connection=self._unregister_connection,
             read_only=read_only,
             fallback_master=fallback_master,
             master_as_replica_weight=master_as_replica_weight,
@@ -186,8 +192,6 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             metrics=self._metrics,
             **kwargs,
         )
-
-        return ctx
 
     def acquire_master(
         self,

@@ -51,10 +51,10 @@ class CalculateMetrics:
         return HasqlMetrics(
             pool=self._pool,
             pool_time=self._pool_time,
-            acquire=self._acquire,
-            acquire_time=self._acquire_time,
-            add_connections=self._add_connections,
-            remove_connections=self._remove_connections,
+            acquire=dict(self._acquire),
+            acquire_time=dict(self._acquire_time),
+            add_connections=dict(self._add_connections),
+            remove_connections=dict(self._remove_connections),
         )
 
     @contextmanager
@@ -67,22 +67,22 @@ class CalculateMetrics:
             self._pool_time += time.monotonic() - tt
 
     @contextmanager
-    def with_acquire(self, pool: str):
-        self._acquire[pool] += 1
+    def with_acquire(self, host: str):
+        self._acquire[host] += 1
         tt = time.monotonic()
         try:
             yield
         finally:
-            self._acquire_time[pool] += time.monotonic() - tt
+            self._acquire_time[host] += time.monotonic() - tt
 
-    def add_connection(self, dsn: str):
-        self._add_connections[dsn] = (
-            self._add_connections.get(dsn, 0) + 1
+    def add_connection(self, host: str):
+        self._add_connections[host] = (
+            self._add_connections.get(host, 0) + 1
         )
 
-    def remove_connection(self, dsn: str):
-        self._remove_connections[dsn] = (
-            self._remove_connections.get(dsn, 0) + 1
+    def remove_connection(self, host: str):
+        self._remove_connections[host] = (
+            self._remove_connections.get(host, 0) + 1
         )
 
 
@@ -132,3 +132,14 @@ class Metrics:
             )
             for p in self.pools
         ]
+
+
+__all__ = (
+    "PoolStats",
+    "DriverMetrics",
+    "HasqlMetrics",
+    "CalculateMetrics",
+    "PoolMetrics",
+    "HasqlGauges",
+    "Metrics",
+)

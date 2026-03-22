@@ -1,12 +1,11 @@
 import asyncio
+from collections.abc import Generator
+from contextlib import AbstractAsyncContextManager
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncContextManager,
-    Generator,
     Generic,
-    Optional,
     Protocol,
     TypeVar,
 )
@@ -25,10 +24,10 @@ class AcquireContext(Protocol[ConnT_co]):
     async def __aenter__(self) -> ConnT_co: ...
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> Optional[bool]: ...
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None: ...
     def __await__(self) -> Generator[Any, None, ConnT_co]: ...
 
 
@@ -59,12 +58,15 @@ class TimeoutAcquireContext(Generic[ConnT]):
         ).__await__()
 
 
-class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
+class PoolAcquireContext(
+    AbstractAsyncContextManager[ConnT],
+    Generic[PoolT, ConnT],
+):
     def __init__(
         self,
         pool_manager: "BasePoolManager[PoolT, ConnT]",
         read_only: bool,
-        master_as_replica_weight: Optional[float],
+        master_as_replica_weight: float | None,
         timeout: float,
         metrics: CalculateMetrics,
         fallback_master: bool = False,
@@ -77,9 +79,9 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
         self.timeout = timeout
         self.kwargs = kwargs
         self.metrics = metrics
-        self._pool: Optional[PoolT] = None
-        self._conn: Optional[ConnT] = None
-        self._context: Optional[AcquireContext[ConnT]] = None
+        self._pool: PoolT | None = None
+        self._conn: ConnT | None = None
+        self._context: AcquireContext[ConnT] | None = None
 
     def _deadline(self) -> float:
         return asyncio.get_running_loop().time() + self.timeout
@@ -130,8 +132,12 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
         with self.metrics.with_acquire(host):
             conn: ConnT = await driver_ctx
 
-        self.metrics.add_connection(host)
-        self.pool_manager._register_connection(conn, pool)
+        try:
+            self.metrics.add_connection(host)
+            self.pool_manager._register_connection(conn, pool)
+        except BaseException:
+            await self.pool_manager._pool_state.release_to_pool(conn, pool)
+            raise
         return conn
 
     async def __aenter__(self) -> ConnT:
@@ -141,8 +147,13 @@ class PoolAcquireContext(AsyncContextManager[ConnT], Generic[PoolT, ConnT]):
         with self.metrics.with_acquire(host):
             conn: ConnT = await driver_ctx.__aenter__()
 
-        self.metrics.add_connection(host)
-        self.pool_manager._register_connection(conn, pool)
+        try:
+            self.metrics.add_connection(host)
+            self.pool_manager._register_connection(conn, pool)
+        except BaseException:
+            await driver_ctx.__aexit__(None, None, None)
+            raise
+
         self._pool = pool
         self._conn = conn
         self._context = driver_ctx

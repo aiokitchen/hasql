@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
 from hasql.pool_state import PoolStateProvider
@@ -20,7 +20,7 @@ class RoundRobinBalancerPolicy(AbstractBalancerPolicy[PoolT]):
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ) -> Optional[PoolT]:
+    ) -> PoolT | None:
         candidates = await self._get_candidates(
             read_only=read_only,
             fallback_master=fallback_master,

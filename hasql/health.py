@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Generic, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
+from .exceptions import PoolManagerClosingError
 from .utils import Dsn
 
 if TYPE_CHECKING:
@@ -18,13 +19,13 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
 
     def __init__(self, manager: "BasePoolManager[PoolT, ConnT]"):
         self._manager = manager
-        self._tasks: Optional[List[asyncio.Task]] = [
+        self._tasks: list[asyncio.Task] | None = [
             asyncio.create_task(self._check_pool_task(index))
             for index in range(len(manager._pool_state.dsn))
         ]
 
     @property
-    def tasks(self) -> Optional[List[asyncio.Task]]:
+    def tasks(self) -> list[asyncio.Task] | None:
         return self._tasks
 
     async def stop(self):
@@ -32,6 +33,8 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
             for task in self._tasks:
                 task.cancel()
 
+            # Tasks may finish with CancelledError or
+            # PoolManagerClosingError — both are expected.
             await asyncio.gather(
                 *self._tasks,
                 return_exceptions=True,
@@ -49,7 +52,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
         pool_state.set_pool(index, pool)
 
         logger.debug("Setting dsn=%r event", censored_dsn)
-        sys_connection: Optional[ConnT] = None
+        sys_connection: ConnT | None = None
         while not manager._closing:
             try:
                 # Don't use async with — we need a custom timeout
@@ -141,7 +144,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                     exc_info=True,
                 )
                 await asyncio.sleep(manager._refresh_delay)
-        raise asyncio.CancelledError("Pool manager is closing")
+        raise PoolManagerClosingError("Pool manager is closing")
 
 
 __all__ = ("PoolHealthMonitor",)

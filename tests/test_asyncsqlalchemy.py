@@ -1,5 +1,3 @@
-from typing import Optional, Type
-
 import mock
 import pytest
 import sqlalchemy as sa
@@ -9,31 +7,22 @@ from hasql.driver.asyncsqlalchemy import PoolManager, async_sessionmaker
 
 
 def test_acquire_from_pool_wraps_with_timeout():
-    from hasql.base import TimeoutAcquireContext
+    from hasql.acquire import TimeoutAcquireContext
     from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
 
-    from hasql.pool_state import PoolState
-
-    pool_manager = PoolManager.__new__(PoolManager)
-    pool_state = PoolState.__new__(PoolState)
-    pool_state._driver = AsyncSqlAlchemyDriver()
-    pool_manager._pool_state = pool_state
+    driver = AsyncSqlAlchemyDriver()
     pool = mock.MagicMock()
-    ctx = pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
+    ctx = driver.acquire_from_pool(pool, timeout=0.25)
     assert isinstance(ctx, TimeoutAcquireContext)
 
 
 def test_acquire_from_pool_no_timeout():
-    from hasql.base import TimeoutAcquireContext
+    from hasql.acquire import TimeoutAcquireContext
     from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
-    from hasql.pool_state import PoolState
 
-    pool_manager = PoolManager.__new__(PoolManager)
-    pool_state = PoolState.__new__(PoolState)
-    pool_state._driver = AsyncSqlAlchemyDriver()
-    pool_manager._pool_state = pool_state
+    driver = AsyncSqlAlchemyDriver()
     pool = mock.MagicMock()
-    ctx = pool_manager._pool_state.acquire_from_pool(pool)
+    ctx = driver.acquire_from_pool(pool)
     assert not isinstance(ctx, TimeoutAcquireContext)
 
 
@@ -107,10 +96,10 @@ async def test_metrics(pool_manager):
 @pytest.mark.parametrize("class_", [AsyncSession, None])
 async def test_async_sessionmaker(
     pool_manager: PoolManager,
-    expire_on_commit: Optional[bool],
-    autoflush: Optional[bool],
-    read_only: Optional[bool],
-    class_: Optional[Type[AsyncSession]],
+    expire_on_commit: bool | None,
+    autoflush: bool | None,
+    read_only: bool | None,
+    class_: type[AsyncSession] | None,
 ):
     acquire_kwargs = {}
 

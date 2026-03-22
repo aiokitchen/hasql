@@ -1,9 +1,7 @@
 import asyncio
 import logging
 from typing import (
-    Dict,
     Generic,
-    Optional,
     TypeVar,
 )
 
@@ -30,7 +28,7 @@ ConnT = TypeVar("ConnT")
 
 
 class BasePoolManager(Generic[PoolT, ConnT]):
-    _unmanaged_connections: Dict[ConnT, PoolT]
+    _unmanaged_connections: dict[ConnT, PoolT]
 
     def __init__(
         self,
@@ -44,7 +42,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         master_as_replica_weight: float = DEFAULT_MASTER_AS_REPLICA_WEIGHT,
         balancer_policy: type[AbstractBalancerPolicy] = GreedyBalancerPolicy,
         stopwatch_window_size: int = DEFAULT_STOPWATCH_WINDOW_SIZE,
-        pool_factory_kwargs: Optional[dict] = None,
+        pool_factory_kwargs: dict | None = None,
     ):
         if not issubclass(balancer_policy, AbstractBalancerPolicy):
             raise ValueError(
@@ -58,7 +56,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             pool_factory_kwargs=pool_factory_kwargs,
         )
 
-        self._balancer: Optional[AbstractBalancerPolicy[PoolT]] = (
+        self._balancer: AbstractBalancerPolicy[PoolT] | None = (
             balancer_policy(self._pool_state)
         )
         self._health: PoolHealthMonitor[PoolT, ConnT] = PoolHealthMonitor(self)
@@ -68,7 +66,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         self._refresh_timeout = refresh_timeout
         self._fallback_master = fallback_master
         self._master_as_replica_weight = master_as_replica_weight
-        self._unmanaged_connections: Dict[ConnT, PoolT] = {}
+        self._unmanaged_connections: dict[ConnT, PoolT] = {}
         self._metrics = CalculateMetrics()
         self._closing = False
         self._closed = False
@@ -80,8 +78,8 @@ class BasePoolManager(Generic[PoolT, ConnT]):
 
     async def ready(
         self,
-        masters_count: Optional[int] = None,
-        replicas_count: Optional[int] = None,
+        masters_count: int | None = None,
+        replicas_count: int | None = None,
         timeout: int = 10,
     ) -> None:
         await self._pool_state.ready(
@@ -148,9 +146,9 @@ class BasePoolManager(Generic[PoolT, ConnT]):
     def acquire(
         self,
         read_only: bool = False,
-        fallback_master: Optional[bool] = None,
-        master_as_replica_weight: Optional[float] = None,
-        timeout: Optional[float] = None,
+        fallback_master: bool | None = None,
+        master_as_replica_weight: float | None = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> "PoolAcquireContext[PoolT, ConnT]":
         if self._closed or self._closing:
@@ -193,16 +191,16 @@ class BasePoolManager(Generic[PoolT, ConnT]):
 
     def acquire_master(
         self,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> "PoolAcquireContext[PoolT, ConnT]":
         return self.acquire(read_only=False, timeout=timeout, **kwargs)
 
     def acquire_replica(
         self,
-        fallback_master: Optional[bool] = None,
-        master_as_replica_weight: Optional[float] = None,
-        timeout: Optional[float] = None,
+        fallback_master: bool | None = None,
+        master_as_replica_weight: float | None = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> "PoolAcquireContext[PoolT, ConnT]":
         return self.acquire(

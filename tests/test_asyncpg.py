@@ -63,14 +63,9 @@ async def test_metrics(pool_manager):
 def test_acquire_from_pool_passes_timeout():
     from hasql.driver.asyncpg import AsyncpgDriver
 
-    from hasql.pool_state import PoolState
-
-    pool_manager = PoolManager.__new__(PoolManager)
-    pool_state = PoolState.__new__(PoolState)
-    pool_state._driver = AsyncpgDriver()
-    pool_manager._pool_state = pool_state
+    driver = AsyncpgDriver()
     pool = mock.MagicMock()
-    pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
+    driver.acquire_from_pool(pool, timeout=0.25)
     pool.acquire.assert_called_once_with(timeout=0.25)
 
 

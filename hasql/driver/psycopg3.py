@@ -1,5 +1,3 @@
-from typing import Optional
-
 from psycopg import AsyncConnection, errors
 from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool
@@ -16,7 +14,7 @@ class Psycopg3AcquireContext:
     def __init__(
         self,
         pool: AsyncConnectionPool,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ):
         self.pool = pool
         self.timeout = timeout
@@ -76,9 +74,11 @@ class Psycopg3Driver(PoolDriver[AsyncConnectionPool, AsyncConnection]):
         return pool
 
     def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
-        kwargs["min_size"] = kwargs.get("min_size", 1) + 1
-        kwargs["max_size"] = kwargs.get("max_size", 10) + 1
-        return kwargs
+        return {
+            **kwargs,
+            "min_size": kwargs.get("min_size", 1) + 1,
+            "max_size": kwargs.get("max_size", 10) + 1,
+        }
 
     async def close_pool(self, pool: AsyncConnectionPool):
         await pool.close()

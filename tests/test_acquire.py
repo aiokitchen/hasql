@@ -167,6 +167,60 @@ async def test_pool_acquire_context_deadline():
     assert deadline <= now + 5.1
 
 
+async def test_pool_acquire_context_aenter_cleans_up_on_register_failure():
+    """If _register_connection raises after driver_ctx.__aenter__ succeeds,
+    the driver context must still be cleaned up via __aexit__."""
+    metrics = CalculateMetrics()
+    pool = object()
+    inner_ctx = FakeAcquireContext()
+
+    pm = _make_mock_pool_manager(pool, inner_ctx)
+    pm._register_connection.side_effect = RuntimeError("register failed")
+
+    ctx = PoolAcquireContext(
+        pool_manager=pm,
+        read_only=False,
+        fallback_master=False,
+        master_as_replica_weight=None,
+        timeout=1.0,
+        metrics=metrics,
+    )
+
+    with pytest.raises(RuntimeError, match="register failed"):
+        await ctx.__aenter__()
+
+    assert inner_ctx.entered
+    assert inner_ctx.exited, "driver context __aexit__ must be called on failure"
+
+
+async def test_pool_acquire_context_await_cleans_up_on_register_failure():
+    """If _register_connection raises after await driver_ctx succeeds,
+    the connection must be released back to the pool."""
+    metrics = CalculateMetrics()
+    pool = object()
+    inner_ctx = FakeAcquireContext()
+
+    pm = _make_mock_pool_manager(pool, inner_ctx)
+    pm._register_connection.side_effect = RuntimeError("register failed")
+    pm._pool_state.release_to_pool = AsyncMock()
+
+    ctx = PoolAcquireContext(
+        pool_manager=pm,
+        read_only=False,
+        fallback_master=False,
+        master_as_replica_weight=None,
+        timeout=1.0,
+        metrics=metrics,
+    )
+
+    with pytest.raises(RuntimeError, match="register failed"):
+        await ctx
+
+    pm._pool_state.release_to_pool.assert_awaited_once_with(
+        inner_ctx.conn, pool,
+    )
+
+
 async def test_pool_acquire_context_kwargs_passed_through():
     metrics = CalculateMetrics()
     pool = object()

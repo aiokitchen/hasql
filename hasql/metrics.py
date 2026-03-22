@@ -3,7 +3,8 @@ import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -13,7 +14,7 @@ class PoolStats:
     max: int
     idle: int
     used: int
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -29,22 +30,22 @@ class DriverMetrics:
 class HasqlMetrics:
     pool: int
     pool_time: float
-    acquire: Dict[str, int]
-    acquire_time: Dict[str, float]
-    add_connections: Dict[str, int]
-    remove_connections: Dict[str, int]
+    acquire: dict[str, int]
+    acquire_time: dict[str, float]
+    add_connections: dict[str, int]
+    remove_connections: dict[str, int]
 
 
 @dataclass
 class CalculateMetrics:
     _pool: int = 0
     _pool_time: float = 0.
-    _acquire: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    _acquire_time: Dict[str, float] = field(
+    _acquire: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    _acquire_time: dict[str, float] = field(
         default_factory=lambda: defaultdict(float)
     )
-    _add_connections: Dict[str, int] = field(default_factory=dict)
-    _remove_connections: Dict[str, int] = field(default_factory=dict)
+    _add_connections: dict[str, int] = field(default_factory=dict)
+    _remove_connections: dict[str, int] = field(default_factory=dict)
 
     def metrics(self) -> HasqlMetrics:
         return HasqlMetrics(
@@ -89,15 +90,15 @@ class CalculateMetrics:
 class PoolMetrics:
     """Per-pool metrics, enriched by the pool manager."""
     host: str
-    role: Optional[str]
+    role: str | None
     healthy: bool
     min: int
     max: int
     idle: int
     used: int
-    response_time: Optional[float]
+    response_time: float | None
     in_flight: int
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

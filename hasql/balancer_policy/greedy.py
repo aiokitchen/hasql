@@ -1,5 +1,4 @@
 import random
-from typing import Optional
 
 from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
 
@@ -10,7 +9,7 @@ class GreedyBalancerPolicy(AbstractBalancerPolicy[PoolT]):
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ) -> Optional[PoolT]:
+    ) -> PoolT | None:
         candidates = await self._get_candidates(
             read_only=read_only,
             fallback_master=fallback_master,
@@ -21,7 +20,7 @@ class GreedyBalancerPolicy(AbstractBalancerPolicy[PoolT]):
             return None
 
         freesizes = [
-            (candidate, self._pool_manager.get_pool_freesize(candidate))
+            (candidate, self._pool_state.get_pool_freesize(candidate))
             for candidate in candidates
         ]
 

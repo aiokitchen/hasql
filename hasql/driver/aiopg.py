@@ -34,9 +34,11 @@ class AiopgDriver(PoolDriver[aiopg.Pool, aiopg.Connection]):
         return await aiopg.create_pool(str(dsn), **kwargs)
 
     def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
-        kwargs["minsize"] = kwargs.get("minsize", 1) + 1
-        kwargs["maxsize"] = kwargs.get("maxsize", 10) + 1
-        return kwargs
+        return {
+            **kwargs,
+            "minsize": kwargs.get("minsize", 1) + 1,
+            "maxsize": kwargs.get("maxsize", 10) + 1,
+        }
 
     async def close_pool(self, pool):
         pool.close()

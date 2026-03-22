@@ -1,16 +1,12 @@
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from itertools import chain
 from types import MappingProxyType
 from typing import (
-    DefaultDict,
     Generic,
-    List,
-    Optional,
     Protocol,
-    Sequence,
-    Set,
     TypeVar,
     runtime_checkable,
 )
@@ -30,42 +26,44 @@ ConnT = TypeVar("ConnT")
 class PoolStateProvider(Protocol[PoolT]):
     @property
     def master_pool_count(self) -> int: ...
-    async def get_master_pools(self) -> List[PoolT]: ...
+    async def get_master_pools(self) -> list[PoolT]: ...
     async def get_replica_pools(
         self, fallback_master: bool = False,
-    ) -> List[PoolT]: ...
+    ) -> list[PoolT]: ...
     def get_pool_freesize(self, pool: PoolT) -> int: ...
-    def get_last_response_time(self, pool: PoolT) -> Optional[float]: ...
+    def get_last_response_time(self, pool: PoolT) -> float | None: ...
 
 
 class PoolState(Generic[PoolT, ConnT]):
     """Owns the driver and all pool state: master/replica sets,
     pool lifecycle, connection operations, waiting, and readiness."""
 
-    _dsn_ready_event: DefaultDict[Dsn, asyncio.Event]
-    _dsn_check_cond: DefaultDict[Dsn, asyncio.Condition]
-    _master_pool_set: Set[PoolT]
-    _replica_pool_set: Set[PoolT]
+    _dsn_ready_event: defaultdict[Dsn, asyncio.Event]
+    _dsn_check_cond: defaultdict[Dsn, asyncio.Condition]
+    _master_pool_set: set[PoolT]
+    _replica_pool_set: set[PoolT]
 
     def __init__(
         self,
-        dsn_list: List[Dsn],
+        dsn_list: list[Dsn],
         driver: PoolDriver[PoolT, ConnT],
         stopwatch_window_size: int,
-        pool_factory_kwargs: Optional[dict] = None,
+        pool_factory_kwargs: dict | None = None,
     ):
         self._driver = driver
         self._pool_factory_kwargs: MappingProxyType = MappingProxyType(
             self._driver.prepare_pool_factory_kwargs(
-                pool_factory_kwargs if pool_factory_kwargs is not None else {},
+                dict(pool_factory_kwargs)
+                if pool_factory_kwargs is not None
+                else {},
             ),
         )
-        self._dsn = dsn_list
-        self._pools: List[Optional[PoolT]] = [None] * len(dsn_list)
+        self._dsn = list(dsn_list)
+        self._pools: list[PoolT | None] = [None] * len(dsn_list)
         self._dsn_ready_event = defaultdict(asyncio.Event)
         self._dsn_check_cond = defaultdict(asyncio.Condition)
-        self._master_pool_set: Set[PoolT] = set()
-        self._replica_pool_set: Set[PoolT] = set()
+        self._master_pool_set: set[PoolT] = set()
+        self._replica_pool_set: set[PoolT] = set()
         self._master_cond = asyncio.Condition()
         self._replica_cond = asyncio.Condition()
         self._stopwatch: Stopwatch[PoolT] = Stopwatch(
@@ -79,11 +77,11 @@ class PoolState(Generic[PoolT, ConnT]):
         return self._driver
 
     @property
-    def dsn(self) -> List[Dsn]:
-        return self._dsn
+    def dsn(self) -> Sequence[Dsn]:
+        return tuple(self._dsn)
 
     @property
-    def pools(self) -> Sequence[Optional[PoolT]]:
+    def pools(self) -> Sequence[PoolT | None]:
         return tuple(self._pools)
 
     @property
@@ -113,7 +111,7 @@ class PoolState(Generic[PoolT, ConnT]):
     def get_pool_freesize(self, pool: PoolT) -> int:
         return self._driver.get_pool_freesize(pool)
 
-    def get_last_response_time(self, pool: PoolT) -> Optional[float]:
+    def get_last_response_time(self, pool: PoolT) -> float | None:
         return self._stopwatch.get_time(pool)
 
     # --- Driver operations ---
@@ -122,7 +120,7 @@ class PoolState(Generic[PoolT, ConnT]):
         self,
         pool: PoolT,
         *,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> AcquireContext[ConnT]:
         return self._driver.acquire_from_pool(pool, timeout=timeout, **kwargs)
@@ -155,14 +153,14 @@ class PoolState(Generic[PoolT, ConnT]):
 
     # --- Pool retrieval (async, waits for availability) ---
 
-    async def get_master_pools(self) -> List[PoolT]:
+    async def get_master_pools(self) -> list[PoolT]:
         await self.wait_for_master_pools()
         return list(self._master_pool_set)
 
     async def get_replica_pools(
         self,
         fallback_master: bool = False,
-    ) -> List[PoolT]:
+    ) -> list[PoolT]:
         if not self._replica_pool_set and fallback_master:
             return await self.get_master_pools()
         await self.wait_for_replica_pools()
@@ -208,8 +206,8 @@ class PoolState(Generic[PoolT, ConnT]):
 
     async def ready(
         self,
-        masters_count: Optional[int] = None,
-        replicas_count: Optional[int] = None,
+        masters_count: int | None = None,
+        replicas_count: int | None = None,
         timeout: int = 10,
     ):
         if (masters_count is not None and replicas_count is None) or (
@@ -225,11 +223,8 @@ class PoolState(Generic[PoolT, ConnT]):
         if replicas_count is not None and replicas_count < 0:
             raise ValueError("replicas_count shouldn't be negative")
 
-        if masters_count is None and replicas_count is None:
-            await asyncio.wait_for(self.wait_all_ready(), timeout=timeout)
-            return
-
         if masters_count is None or replicas_count is None:
+            await asyncio.wait_for(self.wait_all_ready(), timeout=timeout)
             return
 
         await asyncio.wait_for(

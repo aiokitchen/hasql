@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import _AsyncGeneratorContextManager, asynccontextmanager
-from typing import Any, AsyncIterator, Callable, Dict, Optional, Type
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
@@ -53,8 +54,10 @@ class AsyncSqlAlchemyDriver(PoolDriver[AsyncEngine, AsyncConnection]):
         return create_async_engine(d, **kwargs)
 
     def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
-        kwargs["pool_size"] = kwargs.get("pool_size", 1) + 1
-        return kwargs
+        return {
+            **kwargs,
+            "pool_size": kwargs.get("pool_size", 1) + 1,
+        }
 
     async def close_pool(self, pool: AsyncEngine):
         await pool.dispose()
@@ -90,11 +93,11 @@ class PoolManager(BasePoolManager[AsyncEngine, AsyncConnection]):
 def async_sessionmaker(
     pool_manager: PoolManager,
     *,
-    class_: Type[AsyncSession] = AsyncSession,
+    class_: type[AsyncSession] = AsyncSession,
     autoflush: bool = True,
     expire_on_commit: bool = True,
-    info: Optional[Dict[Any, Any]] = None,
-    acquire_kwargs: Optional[Dict[str, Any]] = None,
+    info: dict[Any, Any] | None = None,
+    acquire_kwargs: dict[str, Any] | None = None,
     **kw: Any,
 ) -> Callable[..., _AsyncGeneratorContextManager]:
     """Create async session maker with hasql pool support.

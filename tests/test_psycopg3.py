@@ -134,14 +134,9 @@ async def test_acquire_with_queue_limit(queue_limited_pool_manager, pool_size):
 def test_acquire_from_pool_passes_timeout():
     from hasql.driver.psycopg3 import Psycopg3AcquireContext, Psycopg3Driver
 
-    from hasql.pool_state import PoolState
-
-    pool_manager = PoolManager.__new__(PoolManager)
-    pool_state = PoolState.__new__(PoolState)
-    pool_state._driver = Psycopg3Driver()
-    pool_manager._pool_state = pool_state
+    driver = Psycopg3Driver()
     pool = mock.MagicMock()
-    ctx = pool_manager._pool_state.acquire_from_pool(pool, timeout=0.25)
+    ctx = driver.acquire_from_pool(pool, timeout=0.25)
     assert isinstance(ctx, Psycopg3AcquireContext)
     assert ctx.timeout == 0.25
 

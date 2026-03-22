@@ -1,6 +1,7 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import Generic, Optional, Sequence, TypeVar
+from collections.abc import Sequence
+from typing import Generic, TypeVar
 
 from .acquire import AcquireContext
 from .metrics import DriverMetrics, PoolStats
@@ -21,7 +22,7 @@ class PoolDriver(ABC, Generic[PoolT, ConnT]):
         self,
         pool: PoolT,
         *,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> AcquireContext[ConnT]: ...
 
@@ -56,7 +57,7 @@ class PoolDriver(ABC, Generic[PoolT, ConnT]):
 
     def driver_metrics(
         self,
-        pools: Sequence[Optional[PoolT]],
+        pools: Sequence[PoolT | None],
     ) -> Sequence[DriverMetrics]:
         warnings.warn(
             "driver_metrics() is deprecated, implement pool_stats() instead",

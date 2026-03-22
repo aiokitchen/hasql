@@ -1,5 +1,6 @@
 import asyncio
-from typing import ClassVar, Dict
+import weakref
+from typing import ClassVar
 
 import asyncpg  # type: ignore[import-untyped]
 from packaging.version import parse as parse_version
@@ -11,7 +12,9 @@ from hasql.utils import Dsn
 
 
 class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
-    cached_hosts: ClassVar[Dict[int, str]] = {}
+    cached_hosts: ClassVar[weakref.WeakKeyDictionary[asyncpg.Pool, str]] = (
+        weakref.WeakKeyDictionary()
+    )
 
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()
@@ -30,9 +33,11 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
         return await asyncpg.create_pool(str(dsn), **kwargs)
 
     def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
-        kwargs["min_size"] = kwargs.get("min_size", 1) + 1
-        kwargs["max_size"] = kwargs.get("max_size", 10) + 1
-        return kwargs
+        return {
+            **kwargs,
+            "min_size": kwargs.get("min_size", 1) + 1,
+            "max_size": kwargs.get("max_size", 10) + 1,
+        }
 
     async def close_pool(self, pool):
         await pool.close()
@@ -51,8 +56,8 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
             )
             if conn is not None:
                 addr, _ = conn._addr
-                AsyncpgDriver.cached_hosts[id(pool)] = addr
-            return AsyncpgDriver.cached_hosts.get(id(pool), "unknown")
+                AsyncpgDriver.cached_hosts[pool] = addr
+            return AsyncpgDriver.cached_hosts.get(pool, "unknown")
     else:
         def host(self, pool: asyncpg.Pool):
             addr, _ = pool._working_addr
@@ -69,7 +74,9 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
 
 
 class PoolManager(BasePoolManager[asyncpg.Pool, asyncpg.Connection]):
-    cached_hosts: ClassVar[Dict[int, str]] = AsyncpgDriver.cached_hosts
+    cached_hosts: ClassVar[
+        weakref.WeakKeyDictionary[asyncpg.Pool, str]
+    ] = AsyncpgDriver.cached_hosts
 
     def __init__(self, dsn, **kwargs):
         super().__init__(dsn, driver=AsyncpgDriver(), **kwargs)

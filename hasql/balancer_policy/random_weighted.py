@@ -1,5 +1,5 @@
 import random
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 
 from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
 
@@ -10,7 +10,7 @@ class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ) -> Optional[PoolT]:
+    ) -> PoolT | None:
         candidates = await self._get_candidates(
             read_only=read_only,
             fallback_master=fallback_master,
@@ -21,15 +21,15 @@ class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):
             return None
 
         weights = self._compute_weights(
-            self._pool_manager.get_last_response_time(pool)
+            self._pool_state.get_last_response_time(pool)
             for pool in candidates
         )
         return random.choices(candidates, weights=weights)[0]
 
     @staticmethod
     def _compute_weights(
-        times: Iterable[Optional[float]],
-    ) -> List[float]:
+        times: Iterable[float | None],
+    ) -> list[float]:
         values = [0 if t is None else t for t in times]
         max_time = max(values) if values else 0
         # Reflect: faster (lower time) gets higher weight.

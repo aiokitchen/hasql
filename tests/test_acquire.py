@@ -174,7 +174,9 @@ async def test_pool_acquire_context_aenter_cleans_up_on_register_failure():
         await ctx.__aenter__()
 
     assert inner_ctx.entered
-    assert inner_ctx.exited, "driver context __aexit__ must be called on failure"
+    assert inner_ctx.exited, (
+        "driver context __aexit__ must be called on failure"
+    )
 
 
 async def test_pool_acquire_context_await_cleans_up_on_register_failure():

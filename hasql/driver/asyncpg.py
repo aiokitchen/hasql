@@ -1,5 +1,4 @@
 import asyncio
-import weakref
 from typing import ClassVar
 
 import asyncpg  # type: ignore[import-untyped]
@@ -17,9 +16,7 @@ def _asyncpg_version() -> tuple[int, ...]:
 
 
 class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
-    cached_hosts: ClassVar[weakref.WeakKeyDictionary[asyncpg.Pool, str]] = (
-        weakref.WeakKeyDictionary()
-    )
+    cached_hosts: ClassVar[dict[int, str]] = {}
 
     def get_pool_freesize(self, pool):
         return pool._queue.qsize()
@@ -57,12 +54,16 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
     if _asyncpg_version() >= (0, 29, 0):
         def host(self, pool: asyncpg.Pool):
             conn = next(
-                (holder._con for holder in pool._holders if holder._con), None,
+                (holder._con for holder in pool._holders
+                 if holder._con),
+                None,
             )
             if conn is not None:
                 addr, _ = conn._addr
-                AsyncpgDriver.cached_hosts[pool] = addr
-            return AsyncpgDriver.cached_hosts.get(pool, "unknown")
+                AsyncpgDriver.cached_hosts[id(pool)] = addr
+            return AsyncpgDriver.cached_hosts.get(
+                id(pool), "unknown",
+            )
     else:
         def host(self, pool: asyncpg.Pool):
             addr, _ = pool._working_addr
@@ -79,9 +80,9 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
 
 
 class PoolManager(BasePoolManager[asyncpg.Pool, asyncpg.Connection]):
-    cached_hosts: ClassVar[
-        weakref.WeakKeyDictionary[asyncpg.Pool, str]
-    ] = AsyncpgDriver.cached_hosts
+    cached_hosts: ClassVar[dict[int, str]] = (
+        AsyncpgDriver.cached_hosts
+    )
 
     def __init__(self, dsn, **kwargs):
         super().__init__(dsn, driver=AsyncpgDriver(), **kwargs)

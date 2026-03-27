@@ -227,6 +227,8 @@ class PoolState(Generic[PoolT, ConnT]):
             await asyncio.wait_for(self.wait_all_ready(), timeout=timeout)
             return
 
+        assert replicas_count is not None  # validated above
+
         await asyncio.wait_for(
             asyncio.gather(
                 self.wait_masters_ready(masters_count),

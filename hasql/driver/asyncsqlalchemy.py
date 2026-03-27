@@ -114,11 +114,12 @@ def async_sessionmaker(
 
     Use the `acquire_kwargs` to pass additional parameters to the
     `pool.acquire()` method. E.g. to create a session with replica
-    connection:
-    >>> ReplicaSession = async_sessionmaker(
-    >>>     pool_manager,
-    >>>     acquire_kwargs={"read_only": True}
-    >>> )
+    connection::
+
+        ReplicaSession = async_sessionmaker(
+            pool_manager,
+            acquire_kwargs={"read_only": True},
+        )
 
     """
     if acquire_kwargs is None:

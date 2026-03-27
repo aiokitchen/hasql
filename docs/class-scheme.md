@@ -8,7 +8,7 @@
                          └──────────┬───────────┘
                                     │ uses
                          ┌──────────▼───────────┐
-                         │  Driver PoolManager  │  (hasql.asyncpg.PoolManager, etc.)
+                         │  Driver PoolManager  │  (hasql.driver.asyncpg.PoolManager, etc.)
                          │  thin constructor    │
                          └──────────┬───────────┘
                                     │ extends
@@ -57,9 +57,9 @@ pool_manager.acquire(read_only=...)
             ├─► balancer.get_pool(...)           # select pool
             │       └─► _get_candidates(...)     # from PoolStateProvider
             │       └─► _get_pool(...)           # policy-specific selection
-            ├─► driver.acquire_from_pool(pool)   # get connection
+            ├─► pool_state.acquire_from_pool(pool) # get connection
             │       └─► (may wrap in TimeoutAcquireContext)
-            └─► pool_manager.register_connection(conn, pool)
+            └─► pool_manager._register_connection(conn, pool)
 ```
 
 ## Areas of Responsibility
@@ -83,18 +83,17 @@ Each driver adjusts pool sizes (+1 for system connection) via `prepare_pool_fact
 
 ### 2. `PoolState[PoolT, ConnT]` — Pool State Management (`hasql/pool_state.py`)
 
-Track which pools exist, their roles (master/replica), and provide synchronization primitives for waiting on state changes.
+Single point of contact with the driver. All driver operations go through PoolState; neither the manager nor the health monitor call the driver directly.
 
 | Owns | Does NOT own |
 |---|---|
-| Master/replica pool sets | Creating or destroying pools |
-| Adding/removing pools from role sets | Deciding when to check roles |
-| Waiting primitives (`asyncio.Condition`) | Background health tasks |
-| Pool readiness events | Connection acquisition |
-| Response time tracking (via `Stopwatch`) | Load balancing decisions |
-| `PoolStateProvider` protocol implementation | Metrics collection |
-
-Key invariant: `PoolState` never calls the driver directly — it only manages the state of already-created pools.
+| Driver gateway (all driver calls) | Deciding when to check roles |
+| Master/replica pool sets | Background health tasks |
+| Adding/removing pools from role sets | Connection acquisition (user-facing) |
+| Waiting primitives (`asyncio.Condition`) | Load balancing decisions |
+| Pool readiness events | Metrics collection |
+| Response time tracking (via `Stopwatch`) | |
+| `PoolStateProvider` protocol implementation | |
 
 ### 3. `BasePoolManager[PoolT, ConnT]` — Orchestrator (`hasql/pool_manager.py`)
 
@@ -102,14 +101,13 @@ Compose all subsystems and expose the user-facing API (acquire/release/metrics/l
 
 | Owns | Does NOT own |
 |---|---|
-| Composing PoolState + Driver + Health + Balancer + Metrics | Pool state mutation logic (delegates to PoolState) |
-| Connection tracking (`_unmanaged_connections` dict) | Driver-specific behavior |
-| `acquire()` / `release()` public API | Balancer selection algorithm |
+| Composing PoolState + Health + Balancer + Metrics | Pool state mutation logic (delegates to PoolState) |
+| Connection tracking (`_unmanaged_connections` dict) | Driver-specific behavior (delegates to PoolState → Driver) |
+| `acquire()` public API | Balancer selection algorithm |
 | `metrics()` — enriching raw stats into `PoolMetrics` | Health check scheduling (delegates to HealthMonitor) |
-| Lifecycle: `close()` / `terminate()` | Raw pool stats (delegates to driver) |
-| Pool role refresh logic (`_refresh_pool_role`) | Background task management |
+| Lifecycle: `close()` | Raw pool stats (delegates to PoolState) |
+| Periodic pool check (`_periodic_pool_check`) | Background task management |
 | Context manager (`__aenter__`/`__aexit__`) | |
-| Proxy methods to driver (thin delegation) | |
 
 ### 4. `PoolHealthMonitor[PoolT, ConnT]` — Background Health Checking (`hasql/health.py`)
 
@@ -203,7 +201,7 @@ Used by `PoolState` to track per-pool response times. Consumed by `RandomWeighte
 
 ### 10. Driver-Specific `PoolManager` Classes
 
-Each lives in `hasql/driver/<name>.py` (also re-exported as `hasql.<name>.PoolManager`).
+Each lives in `hasql/driver/<name>.py`.
 
 Thin constructor that creates the appropriate `PoolDriver` and passes it to `BasePoolManager.__init__`.
 
@@ -219,11 +217,11 @@ No additional methods or overrides — purely a convenience binding.
 ## Circular Import Resolution
 
 ```
-pool_state.py ──imports──► utils.py, abc.py
+pool_state.py ──imports──► utils.py, abc.py, acquire.py, metrics.py
 balancer_policy/base.py ──imports──► pool_state.py (PoolStateProvider only)
-pool_manager.py ──imports──► pool_state.py, balancer_policy/, health.py, metrics.py, abc.py
+pool_manager.py ──imports──► pool_state.py, balancer_policy/, health.py, metrics.py, abc.py, acquire.py
 health.py ──TYPE_CHECKING import──► pool_manager.py (BasePoolManager)
-acquire.py ──TYPE_CHECKING import──► pool_manager.py (BasePoolManager)
+acquire.py ──TYPE_CHECKING import──► balancer_policy/base.py, pool_state.py
 ```
 
 The key insight: `AbstractBalancerPolicy` depends on `PoolStateProvider` (a Protocol in `pool_state.py`), not on `BasePoolManager`. This breaks what would otherwise be a circular import between `pool_manager.py` ↔ `balancer_policy/`.

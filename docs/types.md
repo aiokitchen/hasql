@@ -69,11 +69,13 @@ irrelevant. They erase `ConnT` with `Any`:
 
 ```python
 class AbstractBalancerPolicy(ABC, Generic[PoolT]):
-    def __init__(self, pool_manager: BasePoolManager[PoolT, Any]): ...
+    def __init__(self, pool_state: PoolStateProvider[PoolT]): ...
 ```
 
 This is intentional: `GreedyBalancerPolicy[PoolT]` works with any
-`BasePoolManager` regardless of its connection type.
+`PoolStateProvider` regardless of the connection type. Balancer policies
+depend on the `PoolStateProvider` protocol (from `pool_state.py`), not
+on `BasePoolManager` directly — this breaks the circular import.
 
 ## What was done
 
@@ -111,8 +113,8 @@ All justified — either unavoidable Python typing patterns or intentional erasu
 Standard Python typing. The yield type of `__await__` generators is always `Any`
 per PEP 492 and typeshed conventions.
 
-**`BasePoolManager[PoolT, Any]` in balancer policies** (3 occurrences across
-`policy.py`, `balancer_policy/base.py`, `balancer_policy/round_robin.py`):
+**`PoolStateProvider[PoolT]` in balancer policies** (in
+`balancer_policy/base.py` and `balancer_policy/round_robin.py`):
 Intentional ConnT erasure — balancers select pools, never touch connections.
 
 **`Dsn.__init__(**kwargs: Any)`** and **`Dsn.__eq__(other: Any)`** in `utils.py`:

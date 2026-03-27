@@ -9,9 +9,9 @@
 | Subclass `BasePoolManager` to add a custom driver | **Rewrite** — extract driver into `PoolDriver` subclass |
 | Override `_prepare_acquire_kwargs` | **Rewrite** — use explicit `timeout` parameter |
 | `pool.ready()`, `pool.get_master_pools()`, etc. | **Update** — `ready()` and `wait_masters_ready()` are proxied on manager; others via `pool._pool_state.*` |
-| Patch `_is_master` / `_pool_factory` in tests | **None** — proxy methods still patchable |
+| Patch `_is_master` / `_pool_factory` in tests | **Update** — patch on driver via `_pool_state.driver` |
 | Access `_refresh_role_tasks` | **Update** — use `_health.tasks` |
-| Call `_notify_about_pool_has_checked` | **Update** — use `_health._notify_about_pool_has_checked` |
+| Call `_notify_about_pool_has_checked` | **Update** — use `_pool_state.notify_pool_checked` |
 | `metrics().drivers` → list of `DriverMetrics` | **Update** — use `metrics().pools` → list of `PoolMetrics` |
 | `PoolDriver.driver_metrics(pools)` override | **Update** — implement `pool_stats(pool) -> PoolStats` instead |
 | `from hasql.metrics import DriverMetrics` | **None** — still available, but deprecated |
@@ -82,15 +82,20 @@ from hasql.base import (
 
 ### Patching driver methods in tests
 
-Proxy methods on `BasePoolManager` still exist, so `mock.patch` continues to work:
+Driver methods are now on the `PoolDriver` subclass, accessible via
+`pool_manager._pool_state.driver`:
 
 ```python
-# Still works — _is_master is a proxy method on the manager
-with mock.patch.object(pool_manager, "_is_master", ...):
+# Patch on the driver instance
+with mock.patch.object(
+    pool_manager._pool_state.driver, "is_master", ...
+):
     ...
 
-# Also still works (use the new import path)
-with mock.patch("hasql.driver.aiopg.PoolManager._is_master", ...):
+# Or patch the driver class method
+with mock.patch.object(
+    AiopgDriver, "is_master", ...
+):
     ...
 ```
 
@@ -244,9 +249,11 @@ class MyDriver(PoolDriver[MyPool, MyConnection]):
         return await my_driver.create_pool(str(dsn), **kwargs)
 
     def prepare_pool_factory_kwargs(self, kwargs):  # was _prepare_pool_factory_kwargs
-        kwargs["min_size"] = kwargs.get("min_size", 1) + 1
-        kwargs["max_size"] = kwargs.get("max_size", 10) + 1
-        return kwargs
+        return {
+            **kwargs,
+            "min_size": kwargs.get("min_size", 1) + 1,
+            "max_size": kwargs.get("max_size", 10) + 1,
+        }
 
     async def close_pool(self, pool):  # was _close
         await pool.close()
@@ -352,7 +359,7 @@ Health monitoring logic (background tasks, pool creation retry, role checking)
 has been extracted into `PoolHealthMonitor` (`hasql.health`), accessible via
 `pool_manager._health`.
 
-### 6. `_notify_about_pool_has_checked` → `_health._notify_about_pool_has_checked`
+### 6. `_notify_about_pool_has_checked` → `_pool_state.notify_pool_checked`
 
 **Before (0.9.0):**
 
@@ -363,7 +370,7 @@ await self._notify_about_pool_has_checked(dsn)
 **After (0.10.0):**
 
 ```python
-await self._health._notify_about_pool_has_checked(dsn)
+await self._pool_state.notify_pool_checked(dsn)
 ```
 
 ### 7. Removed public methods and properties

@@ -3,12 +3,17 @@ import weakref
 from typing import ClassVar
 
 import asyncpg  # type: ignore[import-untyped]
-from packaging.version import parse as parse_version
 
 from hasql.abc import PoolDriver
 from hasql.metrics import PoolStats
 from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
+
+
+def _asyncpg_version() -> tuple[int, ...]:
+    return tuple(
+        int(x) for x in asyncpg.__version__.split(".")[:3]
+    )
 
 
 class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
@@ -49,7 +54,7 @@ class AsyncpgDriver(PoolDriver[asyncpg.Pool, asyncpg.Connection]):
     def is_connection_closed(self, connection):
         return connection.is_closed()
 
-    if parse_version(asyncpg.__version__) >= parse_version("0.29.0"):
+    if _asyncpg_version() >= (0, 29, 0):
         def host(self, pool: asyncpg.Pool):
             conn = next(
                 (holder._con for holder in pool._holders if holder._con), None,

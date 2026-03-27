@@ -199,6 +199,24 @@ async def test_pool_acquire_context_await_cleans_up_on_register_failure():
     )
 
 
+async def test_timeout_acquire_context_aexit_propagates_return():
+    """If inner __aexit__ returns True (suppress), it must propagate."""
+    class SuppressingContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *exc):
+            return True  # suppress exception
+
+        def __await__(self):
+            return self.__aenter__().__await__()
+
+    ctx = TimeoutAcquireContext(SuppressingContext(), timeout=1.0)
+    await ctx.__aenter__()
+    result = await ctx.__aexit__(ValueError, ValueError("x"), None)
+    assert result is True
+
+
 async def test_pool_acquire_context_kwargs_passed_through():
     metrics = CalculateMetrics()
     pool = object()

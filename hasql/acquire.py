@@ -45,12 +45,12 @@ class TimeoutAcquireContext(Generic[ConnT]):
             timeout=self._timeout,
         )
 
-    async def __aexit__(self, *exc) -> None:
+    async def __aexit__(self, *exc):
         # TODO: consider adding a bounded timeout here. Currently if the
         #  underlying driver hangs during connection release this will block
         #  indefinitely. A timeout risks leaking the connection (not returned
         #  to pool), so this needs careful design.
-        await self._context.__aexit__(*exc)
+        return await self._context.__aexit__(*exc)
 
     def __await__(self) -> Generator[Any, None, ConnT]:
         return asyncio.wait_for(

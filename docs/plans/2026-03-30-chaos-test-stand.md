@@ -626,11 +626,11 @@ git commit -m "chaos: add freeze/unfreeze/promote/kill/restart endpoints"
 - Create: `chaos/harness/__init__.py`
 - Create: `chaos/harness/base.py`
 
-- [ ] **Step 1: Create empty __init__.py**
+- [x] **Step 1: Create empty __init__.py**
 
 Create `chaos/harness/__init__.py` as an empty file.
 
-- [ ] **Step 2: Create base.py with logging, metrics loop, and read/write loop**
+- [x] **Step 2: Create base.py with logging, metrics loop, and read/write loop**
 
 ```python
 from __future__ import annotations
@@ -743,7 +743,7 @@ async def run_harness(
         log(driver, "stop", "closed")
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/harness/
@@ -757,7 +757,7 @@ git commit -m "chaos: add harness base with logging, metrics, and run loop"
 **Files:**
 - Create: `chaos/harness/run_asyncpg.py`
 
-- [ ] **Step 1: Create run_asyncpg.py**
+- [x] **Step 1: Create run_asyncpg.py**
 
 ```python
 from __future__ import annotations
@@ -811,7 +811,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-- [ ] **Step 2: Verify it starts against a running cluster**
+- [x] **Step 2: Verify it starts against a running cluster**
 
 Start cluster: `sudo docker compose -f chaos/docker-compose.yml up -d` (wait for healthy)
 
@@ -819,7 +819,7 @@ Run: `cd chaos/harness && python run_asyncpg.py`
 
 Expected: Logs `init | waiting for ready`, then `init | cluster ready`, then alternating `write | ok` and `read | ok` lines with `metrics` lines every second. Ctrl+C to stop.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/harness/run_asyncpg.py
@@ -833,7 +833,7 @@ git commit -m "chaos: add asyncpg harness runner"
 **Files:**
 - Create: `chaos/harness/run_aiopg.py`
 
-- [ ] **Step 1: Create run_aiopg.py**
+- [x] **Step 1: Create run_aiopg.py**
 
 ```python
 from __future__ import annotations
@@ -892,13 +892,13 @@ if __name__ == "__main__":
 
 Note: aiopg uses `minsize`/`maxsize` (no underscore), not `min_size`/`max_size`.
 
-- [ ] **Step 2: Verify against running cluster**
+- [x] **Step 2: Verify against running cluster**
 
 Run: `cd chaos/harness && python run_aiopg.py`
 
 Expected: Same pattern — init, ready, alternating write/read/metrics. Ctrl+C to stop.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/harness/run_aiopg.py
@@ -912,7 +912,7 @@ git commit -m "chaos: add aiopg harness runner"
 **Files:**
 - Create: `chaos/harness/run_psycopg3.py`
 
-- [ ] **Step 1: Create run_psycopg3.py**
+- [x] **Step 1: Create run_psycopg3.py**
 
 ```python
 from __future__ import annotations
@@ -970,13 +970,13 @@ if __name__ == "__main__":
 
 Note: psycopg3 connections have autocommit off by default. Explicit `COMMIT` after write is needed.
 
-- [ ] **Step 2: Verify against running cluster**
+- [x] **Step 2: Verify against running cluster**
 
 Run: `cd chaos/harness && python run_psycopg3.py`
 
 Expected: Same pattern. Ctrl+C to stop.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/harness/run_psycopg3.py
@@ -990,7 +990,7 @@ git commit -m "chaos: add psycopg3 harness runner"
 **Files:**
 - Create: `chaos/harness/run_asyncsqlalchemy.py`
 
-- [ ] **Step 1: Create run_asyncsqlalchemy.py**
+- [x] **Step 1: Create run_asyncsqlalchemy.py**
 
 ```python
 from __future__ import annotations
@@ -1050,13 +1050,13 @@ if __name__ == "__main__":
 
 Note: asyncsqlalchemy uses `pool_size` (no min/max split), and requires `sa.text()` for raw SQL.
 
-- [ ] **Step 2: Verify against running cluster**
+- [x] **Step 2: Verify against running cluster (skipped - requires live Docker cluster)**
 
 Run: `cd chaos/harness && python run_asyncsqlalchemy.py`
 
 Expected: Same pattern. Ctrl+C to stop.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/harness/run_asyncsqlalchemy.py
@@ -1070,7 +1070,7 @@ git commit -m "chaos: add asyncsqlalchemy harness runner"
 **Files:**
 - Create: `chaos/harness/run_aiopg_sa.py`
 
-- [ ] **Step 1: Create run_aiopg_sa.py**
+- [x] **Step 1: Create run_aiopg_sa.py**
 
 ```python
 from __future__ import annotations
@@ -1128,13 +1128,13 @@ if __name__ == "__main__":
 
 Note: aiopg_sa uses `minsize`/`maxsize` (inherited from aiopg), and `sa.text()` for raw SQL. No explicit COMMIT needed — aiopg_sa auto-commits.
 
-- [ ] **Step 2: Verify against running cluster**
+- [x] **Step 2: Verify against running cluster (skipped - requires live Docker cluster)**
 
 Run: `cd chaos/harness && python run_aiopg_sa.py`
 
 Expected: Same pattern. Ctrl+C to stop.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/harness/run_aiopg_sa.py

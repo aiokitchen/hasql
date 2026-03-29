@@ -47,7 +47,7 @@ class Psycopg3Driver(PoolDriver[AsyncConnectionPool, AsyncConnection]):
         self, pool: AsyncConnectionPool,
         *, timeout=None, **kwargs,
     ):
-        return Psycopg3AcquireContext(pool, timeout=timeout, **kwargs)
+        return Psycopg3AcquireContext(pool, timeout=timeout)
 
     async def release_to_pool(
         self,

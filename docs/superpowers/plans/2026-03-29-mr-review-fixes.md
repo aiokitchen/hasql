@@ -284,7 +284,7 @@ git commit -m "fix(balancer): use standard probability check for master_as_repli
 **Files:**
 - Modify: `hasql/driver/psycopg3.py:46-50`
 
-- [ ] **Step 1: Fix by dropping kwargs silently (they're unused)**
+- [x] **Step 1: Fix by dropping kwargs silently (they're unused)**
 
 The `Psycopg3AcquireContext` constructor only accepts `pool` and `timeout`. The `**kwargs` from `acquire_from_pool` would cause a `TypeError` if any were passed. Since psycopg3 pools don't support extra acquire kwargs, just remove the pass-through:
 
@@ -308,12 +308,12 @@ With:
         return Psycopg3AcquireContext(pool, timeout=timeout)
 ```
 
-- [ ] **Step 2: Run lint + tests**
+- [x] **Step 2: Run lint + tests**
 
 Run: `uv run ruff check hasql/driver/psycopg3.py && uv run pytest tests/test_psycopg3.py -k "not pg_dsn" -v`
 Expected: All pass
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add hasql/driver/psycopg3.py

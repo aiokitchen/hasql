@@ -11,7 +11,7 @@ Dependencies: hasql, aiopg, opentelemetry-sdk,
 import argparse
 import asyncio
 
-from hasql.aiopg import PoolManager
+from hasql.driver.aiopg import PoolManager
 
 from common import register_hasql_metrics, setup_meter_provider
 

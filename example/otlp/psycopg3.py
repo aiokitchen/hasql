@@ -14,7 +14,7 @@ Dependencies: hasql, psycopg[binary], psycopg_pool, opentelemetry-sdk,
 import argparse
 import asyncio
 
-from hasql.psycopg3 import PoolManager
+from hasql.driver.psycopg3 import PoolManager
 
 from common import (
     register_extra_gauges,

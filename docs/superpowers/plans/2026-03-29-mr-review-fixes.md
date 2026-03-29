@@ -102,7 +102,7 @@ git commit -m "fix(docs): update dead import paths in README.rst to hasql.driver
 - Modify: `example/otlp/asyncsqlalchemy.py:18`
 - Modify: `example/otlp/psycopg3.py:17`
 
-- [ ] **Step 1: Fix all 6 example files**
+- [x] **Step 1: Fix all 6 example files**
 
 | File | Old | New |
 |---|---|---|
@@ -113,12 +113,12 @@ git commit -m "fix(docs): update dead import paths in README.rst to hasql.driver
 | `example/otlp/asyncsqlalchemy.py:18` | `from hasql.asyncsqlalchemy import PoolManager` | `from hasql.driver.asyncsqlalchemy import PoolManager` |
 | `example/otlp/psycopg3.py:17` | `from hasql.psycopg3 import PoolManager` | `from hasql.driver.psycopg3 import PoolManager` |
 
-- [ ] **Step 2: Verify no old import paths remain in examples**
+- [x] **Step 2: Verify no old import paths remain in examples**
 
 Run: `grep -rn "from hasql\.\(aiopg\|asyncpg\|psycopg3\|asyncsqlalchemy\|aiopg_sa\|asyncpgsa\) import" example/`
 Expected: No output (0 matches)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add example/

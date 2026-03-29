@@ -15,7 +15,7 @@ import asyncio
 
 import sqlalchemy as sa
 
-from hasql.asyncsqlalchemy import PoolManager
+from hasql.driver.asyncsqlalchemy import PoolManager
 
 from common import (
     register_extra_gauges,

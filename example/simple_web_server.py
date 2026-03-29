@@ -6,7 +6,7 @@ from aiohttp.web_urldispatcher import View
 from aiomisc import entrypoint
 from aiomisc.service.aiohttp import AIOHTTPService
 
-from hasql.aiopg import PoolManager
+from hasql.driver.aiopg import PoolManager
 
 parser = argparse.ArgumentParser()
 group = parser.add_argument_group('HTTP options')

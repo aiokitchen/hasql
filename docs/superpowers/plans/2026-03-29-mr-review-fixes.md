@@ -385,17 +385,17 @@ git commit -m "refactor(balancer): use relative imports consistent with rest of 
 
 ## Task 7: Final validation
 
-- [ ] **Step 1: Run full lint suite**
+- [x] **Step 1: Run full lint suite**
 
 Run: `uv run ruff check hasql tests && uv run mypy --install-types --non-interactive hasql tests`
 Expected: All checks passed, Success: no issues found
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run: `uv run pytest tests/ -q --aiomisc-test-timeout=30 -k "not pg_dsn"`
 Expected: All tests pass (integration tests requiring DB are skipped)
 
-- [ ] **Step 3: Verify no dead import paths remain anywhere**
+- [x] **Step 3: Verify no dead import paths remain anywhere**
 
 Run: `grep -rn "from hasql\.\(aiopg\|asyncpg\|psycopg3\|asyncsqlalchemy\|aiopg_sa\|asyncpgsa\) import" --include="*.py" --include="*.rst" .`
 Expected: Only `example/otlp/common.py:29` should match (it imports `from hasql.pool_manager` which is correct)

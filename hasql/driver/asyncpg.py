@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import ClassVar
 
 import asyncpg  # type: ignore[import-untyped]
@@ -11,7 +12,9 @@ from hasql.utils import Dsn
 
 def _asyncpg_version() -> tuple[int, ...]:
     return tuple(
-        int(x) for x in asyncpg.__version__.split(".")[:3]
+        int(re.match(r"\d+", part).group())  # type: ignore[union-attr]
+        for part in asyncpg.__version__.split(".")[:3]
+        if re.match(r"\d+", part)
     )
 
 

@@ -69,6 +69,38 @@ def test_acquire_from_pool_passes_timeout():
     pool.acquire.assert_called_once_with(timeout=0.25)
 
 
+def test_asyncpg_version_parsing_release():
+    """Standard release version parses correctly."""
+    from hasql.driver.asyncpg import _asyncpg_version
+
+    version = _asyncpg_version()
+    assert isinstance(version, tuple)
+    assert all(isinstance(x, int) for x in version)
+    assert len(version) <= 3
+
+
+def test_asyncpg_version_parsing_prerelease(monkeypatch):
+    """Pre-release versions like '0.29.0rc1' don't crash."""
+    import asyncpg
+
+    from hasql.driver.asyncpg import _asyncpg_version
+
+    monkeypatch.setattr(asyncpg, "__version__", "0.29.0rc1")
+    version = _asyncpg_version()
+    assert version == (0, 29, 0)
+
+
+def test_asyncpg_version_parsing_dev(monkeypatch):
+    """Dev versions like '0.30.0.dev0' don't crash."""
+    import asyncpg
+
+    from hasql.driver.asyncpg import _asyncpg_version
+
+    monkeypatch.setattr(asyncpg, "__version__", "0.30.0.dev0")
+    version = _asyncpg_version()
+    assert version == (0, 30, 0)
+
+
 def test_pool_stats_dynamic_pool_size():
     """used should be based on actual pool size, not maxsize."""
     from hasql.driver.asyncpg import AsyncpgDriver

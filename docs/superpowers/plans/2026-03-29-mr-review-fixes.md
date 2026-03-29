@@ -133,7 +133,7 @@ git commit -m "fix(examples): update dead import paths to hasql.driver.*"
 - Modify: `hasql/driver/asyncpg.py:12-15`
 - Test: `tests/test_asyncpg.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_asyncpg.py`:
 
@@ -166,12 +166,12 @@ def test_asyncpg_version_parsing_dev(monkeypatch):
     assert version == (0, 30, 0)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_asyncpg.py::test_asyncpg_version_parsing_prerelease -v`
 Expected: FAIL with `ValueError: invalid literal for int() with base 10: '0rc1'`
 
-- [ ] **Step 3: Fix the version parser**
+- [x] **Step 3: Fix the version parser**
 
 In `hasql/driver/asyncpg.py`, replace:
 
@@ -195,17 +195,17 @@ def _asyncpg_version() -> tuple[int, ...]:
     )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_asyncpg.py -k "version_parsing" -v`
 Expected: 3 PASSED
 
-- [ ] **Step 5: Run full lint + type check**
+- [x] **Step 5: Run full lint + type check**
 
 Run: `uv run ruff check hasql/driver/asyncpg.py && uv run mypy hasql/driver/asyncpg.py`
 Expected: All checks passed, Success
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add hasql/driver/asyncpg.py tests/test_asyncpg.py

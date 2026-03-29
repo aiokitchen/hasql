@@ -220,7 +220,7 @@ git commit -m "fix(asyncpg): handle pre-release version strings in _asyncpg_vers
 - Modify: `hasql/balancer_policy/base.py:28-29`
 - Test: `tests/test_balancer_policy.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_balancer_policy.py`:
 
@@ -240,12 +240,12 @@ async def test_master_as_replica_weight_zero_always_false(make_pool_manager):
         assert pool is None or pool_manager._pool_state.pool_is_replica(pool)
 ```
 
-- [ ] **Step 2: Run test to verify current behavior**
+- [x] **Step 2: Run test to verify current behavior**
 
 Run: `uv run pytest tests/test_balancer_policy.py::test_master_as_replica_weight_zero_always_false -v`
 Expected: PASS (edge case is rare enough to not trigger in 20 iterations, but the fix is still correct)
 
-- [ ] **Step 3: Fix the probability expression**
+- [x] **Step 3: Fix the probability expression**
 
 In `hasql/balancer_policy/base.py`, replace:
 
@@ -265,12 +265,12 @@ This is the standard probability check:
 - `weight=1.0`: `rand < 1.0` → always True since `random.random()` returns `[0.0, 1.0)` (correct)
 - `weight=0.5`: True ~50% of the time (correct)
 
-- [ ] **Step 4: Run balancer policy tests**
+- [x] **Step 4: Run balancer policy tests**
 
 Run: `uv run pytest tests/test_balancer_policy.py -v`
 Expected: All PASSED
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add hasql/balancer_policy/base.py tests/test_balancer_policy.py

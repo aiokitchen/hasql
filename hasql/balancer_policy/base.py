@@ -25,8 +25,9 @@ class AbstractBalancerPolicy(ABC, Generic[PoolT]):
 
         choose_master_as_replica = False
         if master_as_replica_weight is not None:
-            rand = random.random()
-            choose_master_as_replica = 0 < rand <= master_as_replica_weight
+            choose_master_as_replica = (
+                random.random() < master_as_replica_weight
+            )
 
         return await self._get_pool(
             read_only=read_only,

@@ -106,6 +106,25 @@ async def test_dont_acquire_master_as_replica(
 
 
 @balancer_policies
+async def test_master_as_replica_weight_zero_always_false(
+    make_pool_manager,
+    balancer_policy,
+):
+    """weight=0 should never choose master as replica, even when rand=0."""
+    pool_manager = await make_pool_manager(balancer_policy, replicas_count=2)
+    async with timeout(1):
+        await pool_manager._pool_state.ready()
+
+    # With weight=0, should never get master when requesting replica
+    for _ in range(20):
+        pool = await pool_manager._balancer.get_pool(
+            read_only=True,
+            master_as_replica_weight=0.0,
+        )
+        assert pool is None or pool_manager._pool_state.pool_is_replica(pool)
+
+
+@balancer_policies
 async def test_get_pool_write_with_master_as_replica_weight_raises(
     make_pool_manager,
     balancer_policy,

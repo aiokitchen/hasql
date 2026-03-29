@@ -80,7 +80,7 @@ Code example using ``aiopg``:
 
 .. code-block:: python
 
-    from hasql.aiopg import PoolManager
+    from hasql.driver.aiopg import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -101,7 +101,7 @@ Code example using ``aiopg.sa``:
 
 .. code-block:: python
 
-    from hasql.aiopg_sa import PoolManager
+    from hasql.driver.aiopg_sa import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -125,7 +125,7 @@ For ``asyncpg``
 
 .. code-block:: python
 
-    from hasql.asyncpg import PoolManager
+    from hasql.driver.asyncpg import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -149,7 +149,7 @@ For ``sqlalchemy``
 
 .. code-block:: python
 
-    from hasql.asyncsqlalchemy import PoolManager
+    from hasql.driver.asyncsqlalchemy import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -186,7 +186,7 @@ For ``asyncpgsa``
 
 .. code-block:: python
 
-    from hasql.asyncpgsa import PoolManager
+    from hasql.driver.asyncpgsa import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -215,7 +215,7 @@ default queue behavior is used.
 
 .. code-block:: python
 
-    from hasql.psycopg3 import PoolManager
+    from hasql.driver.psycopg3 import PoolManager
 
 
     hosts = ",".join([
@@ -372,7 +372,7 @@ single "best" pool.
         RandomWeightedBalancerPolicy,
         RoundRobinBalancerPolicy,
     )
-    from hasql.asyncpg import PoolManager
+    from hasql.driver.asyncpg import PoolManager
 
     pool = PoolManager(
         dsn,
@@ -487,7 +487,7 @@ Use the helper from ``example/otlp/common.py``:
 
 .. code-block:: python
 
-    from hasql.asyncpg import PoolManager
+    from hasql.driver.asyncpg import PoolManager
     from example.otlp.common import (
         register_hasql_metrics,
         setup_meter_provider,
@@ -647,7 +647,7 @@ thin subclass that passes the appropriate ``PoolDriver`` instance to
 
 .. code-block:: python
 
-    from hasql.aiopg import PoolManager
+    from hasql.driver.aiopg import PoolManager
 
     # PoolManager internally creates AiopgDriver and passes it
     # to BasePoolManager — no need to interact with PoolDriver directly

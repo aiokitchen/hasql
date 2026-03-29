@@ -1,7 +1,7 @@
 import random
 from collections.abc import Iterable
 
-from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
+from .base import AbstractBalancerPolicy, PoolT
 
 
 class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):

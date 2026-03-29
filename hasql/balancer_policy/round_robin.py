@@ -1,8 +1,8 @@
 from collections import defaultdict
 from typing import NamedTuple
 
-from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
-from hasql.pool_state import PoolStateProvider
+from .base import AbstractBalancerPolicy, PoolT
+from ..pool_state import PoolStateProvider
 
 
 class PoolOptions(NamedTuple):

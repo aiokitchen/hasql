@@ -329,7 +329,7 @@ git commit -m "fix(psycopg3): stop passing unsupported kwargs to Psycopg3Acquire
 - Modify: `hasql/balancer_policy/random_weighted.py:4`
 - Modify: `hasql/balancer_policy/round_robin.py:4-5`
 
-- [ ] **Step 1: Fix imports to use relative style**
+- [x] **Step 1: Fix imports to use relative style**
 
 In `hasql/balancer_policy/greedy.py`, replace:
 
@@ -369,12 +369,12 @@ from .base import AbstractBalancerPolicy, PoolT
 from ..pool_state import PoolStateProvider
 ```
 
-- [ ] **Step 2: Run lint + type check + tests**
+- [x] **Step 2: Run lint + type check + tests**
 
 Run: `uv run ruff check hasql/balancer_policy/ && uv run mypy hasql/balancer_policy/ && uv run pytest tests/test_balancer_policy.py tests/test_policy.py -v`
 Expected: All pass
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add hasql/balancer_policy/

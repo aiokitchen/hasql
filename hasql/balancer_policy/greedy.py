@@ -1,6 +1,6 @@
 import random
 
-from hasql.balancer_policy.base import AbstractBalancerPolicy, PoolT
+from .base import AbstractBalancerPolicy, PoolT
 
 
 class GreedyBalancerPolicy(AbstractBalancerPolicy[PoolT]):

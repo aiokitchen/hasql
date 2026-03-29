@@ -47,7 +47,7 @@ Modified:
 **Files:**
 - Create: `chaos/Dockerfile.pg`
 
-- [ ] **Step 1: Create Dockerfile.pg**
+- [x] **Step 1: Create Dockerfile.pg**
 
 ```dockerfile
 FROM postgres:16
@@ -55,7 +55,7 @@ FROM postgres:16
 RUN apt-get update && apt-get install -y --no-install-recommends iptables && rm -rf /var/lib/apt/lists/*
 ```
 
-- [ ] **Step 2: Build the image to verify**
+- [x] **Step 2: Build the image to verify**
 
 Run: `sudo docker build -f chaos/Dockerfile.pg -t chaos-postgres:16 chaos/`
 
@@ -63,13 +63,13 @@ If DNS fails during build, use: `sudo docker build --network=host -f chaos/Docke
 
 Expected: Image builds successfully, iptables installed.
 
-- [ ] **Step 3: Verify iptables works inside the image**
+- [x] **Step 3: Verify iptables works inside the image**
 
 Run: `sudo docker run --rm --cap-add=NET_ADMIN chaos-postgres:16 iptables -L -n`
 
 Expected: Shows default chains (INPUT, FORWARD, OUTPUT) with ACCEPT policy.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add chaos/Dockerfile.pg
@@ -84,7 +84,7 @@ git commit -m "chaos: add Dockerfile with postgres:16 + iptables"
 - Create: `chaos/pg-master/init.sql`
 - Create: `chaos/pg-master/pg_hba.conf`
 
-- [ ] **Step 1: Create init.sql**
+- [x] **Step 1: Create init.sql**
 
 ```sql
 -- Create replication user
@@ -105,7 +105,7 @@ GRANT ALL ON test_data TO testuser;
 GRANT USAGE, SELECT ON SEQUENCE test_data_id_seq TO testuser;
 ```
 
-- [ ] **Step 2: Create pg_hba.conf**
+- [x] **Step 2: Create pg_hba.conf**
 
 ```
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
@@ -116,7 +116,7 @@ host    all             all             0.0.0.0/0               md5
 host    replication     replicator      0.0.0.0/0               md5
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/pg-master/
@@ -130,7 +130,7 @@ git commit -m "chaos: add master PG init.sql and pg_hba.conf"
 **Files:**
 - Create: `chaos/pg-replica/entrypoint.sh`
 
-- [ ] **Step 1: Create entrypoint.sh**
+- [x] **Step 1: Create entrypoint.sh**
 
 ```bash
 #!/bin/bash
@@ -163,11 +163,11 @@ fi
 exec docker-entrypoint.sh postgres
 ```
 
-- [ ] **Step 2: Make executable**
+- [x] **Step 2: Make executable**
 
 Run: `chmod +x chaos/pg-replica/entrypoint.sh`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add chaos/pg-replica/
@@ -181,7 +181,7 @@ git commit -m "chaos: add replica entrypoint with pg_basebackup"
 **Files:**
 - Create: `chaos/docker-compose.yml`
 
-- [ ] **Step 1: Create docker-compose.yml**
+- [x] **Step 1: Create docker-compose.yml**
 
 ```yaml
 services:
@@ -283,31 +283,31 @@ networks:
     driver: bridge
 ```
 
-- [ ] **Step 2: Build and start the cluster**
+- [x] **Step 2: Build and start the cluster**
 
 Run: `cd chaos && sudo docker compose up -d --build`
 
 If DNS fails during build, build image first: `sudo docker build --network=host -f Dockerfile.pg -t chaos-postgres:16 .` then `sudo docker compose up -d`
 
-- [ ] **Step 3: Wait for all nodes to be healthy**
+- [x] **Step 3: Wait for all nodes to be healthy**
 
 Run: `sudo docker compose -f chaos/docker-compose.yml ps`
 
 Expected: All 3 containers show `healthy` status. May take 10-20s for replicas to complete `pg_basebackup`.
 
-- [ ] **Step 4: Verify master role**
+- [x] **Step 4: Verify master role**
 
 Run: `sudo docker exec chaos-pg-master psql -U testuser -d testdb -c "SHOW transaction_read_only;"`
 
 Expected: `off`
 
-- [ ] **Step 5: Verify replica roles**
+- [x] **Step 5: Verify replica roles**
 
 Run: `sudo docker exec chaos-pg-replica-1 psql -U testuser -d testdb -c "SHOW transaction_read_only;" && sudo docker exec chaos-pg-replica-2 psql -U testuser -d testdb -c "SHOW transaction_read_only;"`
 
 Expected: Both show `on`
 
-- [ ] **Step 6: Verify replication works**
+- [x] **Step 6: Verify replication works**
 
 Run:
 ```bash
@@ -317,7 +317,7 @@ sudo docker exec chaos-pg-replica-1 psql -U testuser -d testdb -c "SELECT * FROM
 
 Expected: Row visible on replica.
 
-- [ ] **Step 7: Verify iptables works**
+- [x] **Step 7: Verify iptables works**
 
 Run:
 ```bash
@@ -328,11 +328,11 @@ sudo docker exec chaos-pg-master iptables -D INPUT -p tcp --dport 5432 -j DROP
 
 Expected: Rule added, listed, then removed. No errors.
 
-- [ ] **Step 8: Stop the cluster**
+- [x] **Step 8: Stop the cluster**
 
 Run: `sudo docker compose -f chaos/docker-compose.yml down -v`
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add chaos/docker-compose.yml

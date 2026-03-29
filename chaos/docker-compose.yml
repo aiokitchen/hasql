@@ -1,0 +1,97 @@
+services:
+  pg-master:
+    build:
+      context: .
+      dockerfile: Dockerfile.pg
+    image: chaos-postgres:16
+    container_name: chaos-pg-master
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=4
+      - -c
+      - hot_standby=on
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - pg-master-data:/var/lib/postgresql/data
+      - ./pg-master/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./pg-master/pg_hba.conf:/etc/postgresql/pg_hba.conf
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - chaos-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  pg-replica-1:
+    image: chaos-postgres:16
+    container_name: chaos-pg-replica-1
+    ports:
+      - "15433:5432"
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_PASSWORD: postgres
+    entrypoint: /entrypoint-replica.sh
+    volumes:
+      - pg-replica-1-data:/var/lib/postgresql/data
+      - ./pg-replica/entrypoint.sh:/entrypoint-replica.sh
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      pg-master:
+        condition: service_healthy
+    networks:
+      - chaos-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  pg-replica-2:
+    image: chaos-postgres:16
+    container_name: chaos-pg-replica-2
+    ports:
+      - "15434:5432"
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_PASSWORD: postgres
+    entrypoint: /entrypoint-replica.sh
+    volumes:
+      - pg-replica-2-data:/var/lib/postgresql/data
+      - ./pg-replica/entrypoint.sh:/entrypoint-replica.sh
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      pg-master:
+        condition: service_healthy
+    networks:
+      - chaos-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg-master-data:
+  pg-replica-1-data:
+  pg-replica-2-data:
+
+networks:
+  chaos-net:
+    driver: bridge

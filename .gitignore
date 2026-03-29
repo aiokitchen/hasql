@@ -17,4 +17,8 @@ version.py
 .tox/
 htmlcov/
 /.venv*
+chaos/.venv/
 
+
+# ralphex progress logs
+.ralphex/progress/

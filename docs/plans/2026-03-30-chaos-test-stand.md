@@ -347,18 +347,18 @@ git commit -m "chaos: add Docker Compose with 1 master + 2 replicas"
 - Create: `chaos/requirements.txt`
 - Create: `chaos/controller.py` (skeleton with `/status` and `/reset`)
 
-- [ ] **Step 1: Create requirements.txt**
+- [x] **Step 1: Create requirements.txt**
 
 ```
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
 ```
 
-- [ ] **Step 2: Install controller deps**
+- [x] **Step 2: Install controller deps**
 
 Run: `uv pip install -r chaos/requirements.txt`
 
-- [ ] **Step 3: Create controller.py with node mapping, docker_exec helper, and /status endpoint**
+- [x] **Step 3: Create controller.py with node mapping, docker_exec helper, and /status endpoint**
 
 ```python
 from __future__ import annotations
@@ -470,7 +470,7 @@ async def reset():
     return {"actions": actions}
 ```
 
-- [ ] **Step 4: Start controller and verify /status**
+- [x] **Step 4: Start controller and verify /status**
 
 Run (in background): `uvicorn chaos.controller:app --port 8080 &`
 
@@ -480,11 +480,11 @@ Run: `curl -s localhost:8080/status | python3 -m json.tool`
 
 Expected: JSON with all 3 nodes showing role and running status (or errors if cluster is down).
 
-- [ ] **Step 5: Kill the controller**
+- [x] **Step 5: Kill the controller**
 
 Run: `kill %1` (or `pkill -f uvicorn`)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add chaos/requirements.txt chaos/controller.py
@@ -498,7 +498,7 @@ git commit -m "chaos: add controller skeleton with /status and /reset"
 **Files:**
 - Modify: `chaos/controller.py`
 
-- [ ] **Step 1: Add /freeze/{node} endpoint**
+- [x] **Step 1: Add /freeze/{node} endpoint**
 
 Append to `chaos/controller.py`:
 
@@ -518,7 +518,7 @@ async def freeze(node: str):
     return {"action": "freeze", "node": node}
 ```
 
-- [ ] **Step 2: Add /unfreeze/{node} endpoint**
+- [x] **Step 2: Add /unfreeze/{node} endpoint**
 
 Append to `chaos/controller.py`:
 
@@ -538,7 +538,7 @@ async def unfreeze(node: str):
     return {"action": "unfreeze", "node": node}
 ```
 
-- [ ] **Step 3: Add /promote/{node} endpoint**
+- [x] **Step 3: Add /promote/{node} endpoint**
 
 Append to `chaos/controller.py`:
 
@@ -558,7 +558,7 @@ async def promote(node: str):
     return {"action": "promote", "node": node}
 ```
 
-- [ ] **Step 4: Add /kill/{node} and /restart/{node} endpoints**
+- [x] **Step 4: Add /kill/{node} and /restart/{node} endpoints**
 
 Append to `chaos/controller.py`:
 
@@ -587,7 +587,7 @@ async def restart_node(node: str):
     return {"action": "restart", "node": node}
 ```
 
-- [ ] **Step 5: Verify all endpoints**
+- [x] **Step 5: Verify all endpoints**
 
 Start cluster: `sudo docker compose -f chaos/docker-compose.yml up -d`
 
@@ -611,7 +611,7 @@ pkill -f uvicorn
 sudo docker compose -f chaos/docker-compose.yml down -v
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add chaos/controller.py

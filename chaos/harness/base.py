@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 import time
 from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
-from typing import Any
 
 from hasql.base import BasePoolManager
 
@@ -45,36 +45,22 @@ async def _log_metrics(driver: str, manager: BasePoolManager) -> None:
             log(driver, "metrics", f"error: {exc}")
 
 
-async def _do_write(
+async def _do_operation(
     driver: str,
     manager: BasePoolManager,
-    execute_write: Callable[..., Coroutine],
+    execute_fn: Callable[..., Coroutine],
+    acquire_method: str,
+    label: str,
 ) -> None:
     t0 = time.monotonic()
     try:
-        async with manager.acquire_master() as conn:
-            await execute_write(conn)
+        async with getattr(manager, acquire_method)() as conn:
+            await execute_fn(conn)
             elapsed = int((time.monotonic() - t0) * 1000)
-            log(driver, "write", f"ok | {elapsed}ms")
+            log(driver, label, f"ok | {elapsed}ms")
     except Exception as exc:
         elapsed = int((time.monotonic() - t0) * 1000)
-        log(driver, "write", f"error | {elapsed}ms | {type(exc).__name__}: {exc}")
-
-
-async def _do_read(
-    driver: str,
-    manager: BasePoolManager,
-    execute_read: Callable[..., Coroutine],
-) -> None:
-    t0 = time.monotonic()
-    try:
-        async with manager.acquire_replica() as conn:
-            await execute_read(conn)
-            elapsed = int((time.monotonic() - t0) * 1000)
-            log(driver, "read", f"ok | {elapsed}ms")
-    except Exception as exc:
-        elapsed = int((time.monotonic() - t0) * 1000)
-        log(driver, "read", f"error | {elapsed}ms | {type(exc).__name__}: {exc}")
+        log(driver, label, f"error | {elapsed}ms | {type(exc).__name__}: {exc}")
 
 
 async def run_harness(
@@ -92,8 +78,8 @@ async def run_harness(
     metrics_task = asyncio.create_task(_log_metrics(driver, manager))
     try:
         while True:
-            await _do_write(driver, manager, execute_write)
-            await _do_read(driver, manager, execute_read)
+            await _do_operation(driver, manager, execute_write, "acquire_master", "write")
+            await _do_operation(driver, manager, execute_read, "acquire_replica", "read")
             await asyncio.sleep(interval)
     except asyncio.CancelledError:
         log(driver, "stop", "cancelled")
@@ -103,5 +89,39 @@ async def run_harness(
             await metrics_task
         except asyncio.CancelledError:
             pass
-        await manager.close()
+        try:
+            await manager.close()
+        except Exception as exc:
+            log(driver, "stop", f"close error: {exc}")
         log(driver, "stop", "closed")
+
+
+async def harness_main(
+    driver: str,
+    manager: BasePoolManager,
+    execute_write: Callable[..., Coroutine],
+    execute_read: Callable[..., Coroutine],
+) -> None:
+    """Shared entry point for all harness runners."""
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGINT, stop.set)
+    loop.add_signal_handler(signal.SIGTERM, stop.set)
+
+    task = asyncio.create_task(
+        run_harness(driver, manager, execute_write, execute_read)
+    )
+
+    def _on_task_done(t: asyncio.Task) -> None:
+        if not t.cancelled() and t.exception() is not None:
+            log(driver, "error", f"harness failed: {t.exception()}")
+            stop.set()
+
+    task.add_done_callback(_on_task_done)
+
+    await stop.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass

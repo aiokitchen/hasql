@@ -1,69 +1,73 @@
 import asyncio
 from contextlib import _AsyncGeneratorContextManager, asynccontextmanager
-from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence, Type
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import QueuePool
 
-from hasql.base import BasePoolManager, TimeoutAcquireContext
-from hasql.metrics import DriverMetrics
+from hasql.abc import PoolDriver
+from hasql.acquire import TimeoutAcquireContext
+from hasql.metrics import PoolStats
+from hasql.pool_manager import BasePoolManager
 from hasql.utils import Dsn
 
 
-class PoolManager(BasePoolManager):
-    # TODO: _timeout is a smuggled kwarg key — consider returning a
-    #  (kwargs, timeout) tuple from _prepare_acquire_kwargs instead.
-    def _prepare_acquire_kwargs(
-        self,
-        kwargs: dict,
-        timeout: float,
-    ) -> dict:
-        prepared_kwargs = super()._prepare_acquire_kwargs(kwargs, timeout)
-        prepared_kwargs["_timeout"] = timeout
-        return prepared_kwargs
+class AsyncSqlAlchemyDriver(PoolDriver[AsyncEngine, AsyncConnection]):
 
     def get_pool_freesize(self, pool: AsyncEngine):
         queue_pool: QueuePool = pool.sync_engine.pool
         return queue_pool.size() - queue_pool.checkedout()
 
-    def acquire_from_pool(self, pool: AsyncEngine, **kwargs):
-        timeout = kwargs.pop("_timeout", None)
+    def acquire_from_pool(
+        self, pool: AsyncEngine,
+        *, timeout=None, **kwargs,
+    ):
         ctx = pool.connect()
         if timeout is not None:
             return TimeoutAcquireContext(ctx, timeout)
         return ctx
 
-    async def release_to_pool(      # type: ignore
+    async def release_to_pool(
         self,
         connection: AsyncConnection,
-        _: AsyncEngine,
-        **kwargs
+        pool: AsyncEngine,
+        **kwargs,
     ):
         await connection.close()
 
-    async def _is_master(self, connection: AsyncConnection):
+    async def is_master(self, connection: AsyncConnection):
         result = await connection.scalar(
             sa.text("SHOW transaction_read_only"),
         ) == "off"
         await connection.execute(sa.text('COMMIT'))
         return result
 
-    async def _pool_factory(self, dsn: Dsn):
+    async def fetch_scalar(self, connection: AsyncConnection, query: str):
+        result = await connection.scalar(sa.text(query))
+        await connection.execute(sa.text("COMMIT"))
+        return result
+
+    async def pool_factory(self, dsn: Dsn, **kwargs):
         d = str(dsn)
         if d.startswith('postgresql://'):
             d = d.replace('postgresql://', 'postgresql+asyncpg://', 1)
-        return create_async_engine(d, **self.pool_factory_kwargs)
+        elif d.startswith('postgres://'):
+            d = d.replace('postgres://', 'postgresql+asyncpg://', 1)
+        return create_async_engine(d, **kwargs)
 
-    def _prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
-        kwargs["pool_size"] = kwargs.get("pool_size", 1) + 1
-        return kwargs
+    def prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:
+        return {
+            **kwargs,
+            "pool_size": kwargs.get("pool_size", 1) + 1,
+        }
 
-    async def _close(self, pool: AsyncEngine):
+    async def close_pool(self, pool: AsyncEngine):
         await pool.dispose()
 
-    async def _terminate(self, pool: AsyncEngine):
+    async def terminate_pool(self, pool: AsyncEngine):
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, pool.sync_engine.dispose)
 
@@ -71,30 +75,34 @@ class PoolManager(BasePoolManager):
         return connection.closed
 
     def host(self, pool: AsyncEngine):
-        return pool.sync_engine.url.host
+        return pool.sync_engine.url.host or "unknown"
 
-    def _driver_metrics(self) -> Sequence[DriverMetrics]:
-        return [
-            DriverMetrics(
-                max=p.sync_engine.pool.size(),
-                min=0,
-                idle=p.sync_engine.pool.checkedin(),
-                used=p.sync_engine.pool.checkedout(),
-                host=p.sync_engine.url.host,
-            )
-            for p in self.pools
-            if p
-        ]
+    def pool_stats(self, pool: AsyncEngine) -> PoolStats:
+        qp = pool.sync_engine.pool
+        return PoolStats(
+            min=0,
+            max=qp.size(),
+            idle=qp.checkedin(),
+            used=qp.checkedout(),
+            extra={
+                "overflow": qp.overflow(),
+            },
+        )
+
+
+class PoolManager(BasePoolManager[AsyncEngine, AsyncConnection]):
+    def __init__(self, dsn, **kwargs):
+        super().__init__(dsn, driver=AsyncSqlAlchemyDriver(), **kwargs)
 
 
 def async_sessionmaker(
     pool_manager: PoolManager,
     *,
-    class_: Type[AsyncSession] = AsyncSession,
+    class_: type[AsyncSession] = AsyncSession,
     autoflush: bool = True,
     expire_on_commit: bool = True,
-    info: Optional[Dict[Any, Any]] = None,
-    acquire_kwargs: Optional[Dict[str, Any]] = None,
+    info: dict[Any, Any] | None = None,
+    acquire_kwargs: dict[str, Any] | None = None,
     **kw: Any,
 ) -> Callable[..., _AsyncGeneratorContextManager]:
     """Create async session maker with hasql pool support.
@@ -111,11 +119,12 @@ def async_sessionmaker(
 
     Use the `acquire_kwargs` to pass additional parameters to the
     `pool.acquire()` method. E.g. to create a session with replica
-    connection:
-    >>> ReplicaSession = async_sessionmaker(
-    >>>     pool_manager,
-    >>>     acquire_kwargs={"read_only": True}
-    >>> )
+    connection::
+
+        ReplicaSession = async_sessionmaker(
+            pool_manager,
+            acquire_kwargs={"read_only": True},
+        )
 
     """
     if acquire_kwargs is None:
@@ -139,4 +148,4 @@ def async_sessionmaker(
     return create_async_session
 
 
-__all__ = ("PoolManager", "async_sessionmaker")
+__all__ = ("AsyncSqlAlchemyDriver", "PoolManager", "async_sessionmaker")

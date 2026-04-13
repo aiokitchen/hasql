@@ -1,40 +1,37 @@
 import random
 
-from hasql.balancer_policy.base import BaseBalancerPolicy
+from .base import AbstractBalancerPolicy, PoolT
 
 
-class GreedyBalancerPolicy(BaseBalancerPolicy):
+class GreedyBalancerPolicy(AbstractBalancerPolicy[PoolT]):
     async def _get_pool(
         self,
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ):
-        candidates = []
+    ) -> PoolT | None:
+        candidates = await self._get_candidates(
+            read_only=read_only,
+            fallback_master=fallback_master,
+            choose_master_as_replica=choose_master_as_replica,
+        )
 
-        if read_only:
-            candidates.extend(
-                await self._pool_manager.get_replica_pools(
-                    fallback_master=fallback_master,
-                ),
-            )
+        if not candidates:
+            return None
 
-        if (
-                not read_only or
-                (
-                    choose_master_as_replica and
-                    self._pool_manager.master_pool_count > 0
-                )
-        ):
-            candidates.extend(await self._pool_manager.get_master_pools())
-
-        fat_pool = max(candidates, key=self._pool_manager.get_pool_freesize)
-        max_freesize = self._pool_manager.get_pool_freesize(fat_pool)
-        return random.choice([
-            candidate
+        freesizes = [
+            (candidate, self._pool_state.get_pool_freesize(candidate))
             for candidate in candidates
-            if self._pool_manager.get_pool_freesize(candidate) == max_freesize
-        ])
+        ]
+
+        max_freesize = max(freesize for _, freesize in freesizes)
+        best = [
+            candidate
+            for candidate, freesize in freesizes
+            if freesize == max_freesize
+        ]
+
+        return random.choice(best)
 
 
 __all__ = ("GreedyBalancerPolicy",)

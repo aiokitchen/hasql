@@ -13,6 +13,11 @@ class PoolRole(str, Enum):
     REPLICA = "replica"
 
 
+class PoolStaleness(str, Enum):
+    FRESH = "fresh"
+    STALE = "stale"
+
+
 @dataclass(frozen=True)
 class PoolStats:
     """Raw pool statistics returned by a driver for a single pool."""
@@ -104,6 +109,8 @@ class PoolMetrics:
     used: int
     response_time: float | None
     in_flight: int
+    staleness: PoolStaleness | None = None
+    lag: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -116,6 +123,7 @@ class HasqlGauges:
     active_connections: int
     closing: bool
     closed: bool
+    stale_count: int = 0
     unavailable_count: int = 0
 
 
@@ -143,6 +151,7 @@ class Metrics:
 
 __all__ = (
     "PoolRole",
+    "PoolStaleness",
     "PoolStats",
     "DriverMetrics",
     "HasqlMetrics",

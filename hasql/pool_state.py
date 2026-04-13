@@ -14,6 +14,7 @@ from typing import (
 from .abc import PoolDriver
 from .acquire import AcquireContext
 from .metrics import PoolStats
+from .staleness import CheckContext, StalenessCheckResult, StalenessPolicy
 from .utils import Dsn, Stopwatch
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,13 @@ class PoolStateProvider(Protocol[PoolT]):
     def master_pool_count(self) -> int: ...
     @property
     def replica_pool_count(self) -> int: ...
+    @property
+    def stale_pool_count(self) -> int: ...
     async def get_master_pools(self) -> list[PoolT]: ...
     async def get_replica_pools(
         self, fallback_master: bool = False,
     ) -> list[PoolT]: ...
+    def get_stale_pools(self) -> list[PoolT]: ...
     def get_pool_freesize(self, pool: PoolT) -> int: ...
     def get_last_response_time(self, pool: PoolT) -> float | None: ...
 
@@ -44,6 +48,7 @@ class PoolState(Generic[PoolT, ConnT]):
     _dsn_check_cond: defaultdict[Dsn, asyncio.Condition]
     _master_pool_set: set[PoolT]
     _replica_pool_set: set[PoolT]
+    _stale_pool_set: set[PoolT]
 
     def __init__(
         self,
@@ -51,6 +56,7 @@ class PoolState(Generic[PoolT, ConnT]):
         driver: PoolDriver[PoolT, ConnT],
         stopwatch_window_size: int,
         pool_factory_kwargs: dict | None = None,
+        staleness: StalenessPolicy | None = None,
     ):
         self._driver = driver
         self._pool_factory_kwargs: MappingProxyType = MappingProxyType(
@@ -66,11 +72,14 @@ class PoolState(Generic[PoolT, ConnT]):
         self._dsn_check_cond = defaultdict(asyncio.Condition)
         self._master_pool_set: set[PoolT] = set()
         self._replica_pool_set: set[PoolT] = set()
+        self._stale_pool_set: set[PoolT] = set()
         self._master_cond = asyncio.Condition()
         self._replica_cond = asyncio.Condition()
         self._stopwatch: Stopwatch[PoolT] = Stopwatch(
             window_size=stopwatch_window_size,
         )
+        self._staleness: StalenessPolicy | None = staleness
+        self._last_check_result: dict[PoolT, StalenessCheckResult] = {}
 
     # --- Properties ---
 
@@ -99,8 +108,16 @@ class PoolState(Generic[PoolT, ConnT]):
         return len(self._replica_pool_set)
 
     @property
+    def stale_pool_count(self) -> int:
+        return len(self._stale_pool_set)
+
+    @property
     def available_pool_count(self) -> int:
-        return self.master_pool_count + self.replica_pool_count
+        return (
+            self.master_pool_count
+            + self.replica_pool_count
+            + self.stale_pool_count
+        )
 
     # --- Pool state queries ---
 
@@ -110,11 +127,20 @@ class PoolState(Generic[PoolT, ConnT]):
     def pool_is_replica(self, pool: PoolT) -> bool:
         return pool in self._replica_pool_set
 
+    def get_stale_pools(self) -> list[PoolT]:
+        return list(self._stale_pool_set)
+
     def get_pool_freesize(self, pool: PoolT) -> int:
         return self._driver.get_pool_freesize(pool)
 
     def get_last_response_time(self, pool: PoolT) -> float | None:
         return self._stopwatch.get_time(pool)
+
+    def pool_is_stale(self, pool: PoolT) -> bool:
+        return pool in self._stale_pool_set
+
+    def get_last_check_result(self, pool: PoolT) -> StalenessCheckResult | None:
+        return self._last_check_result.get(pool)
 
     # --- Driver operations ---
 
@@ -262,18 +288,72 @@ class PoolState(Generic[PoolT, ConnT]):
         if is_master:
             await self._add_pool_to_master_set(pool, dsn)
             self._remove_pool_from_replica_set(pool, dsn)
+            self._stale_pool_set.discard(pool)
+            self._last_check_result.pop(pool, None)
+            if self._staleness:
+                self._staleness.remove_pool(pool)
         else:
             await self._add_pool_to_replica_set(pool, dsn)
             self._remove_pool_from_master_set(pool, dsn)
+            self._stale_pool_set.discard(pool)
         self._dsn_ready_event[dsn].set()
+
+    # --- Staleness checking ---
+
+    def _make_check_context(self, connection: ConnT) -> CheckContext:
+        return CheckContext(connection, self._driver)
+
+    async def check_replica_staleness(
+        self, pool: PoolT, dsn: Dsn, connection: ConnT,
+    ):
+        if not self._staleness:
+            return
+        if (
+            pool not in self._replica_pool_set
+            and pool not in self._stale_pool_set
+        ):
+            return
+        ctx = self._make_check_context(connection)
+        result = await self._staleness.check(pool, ctx)
+        self._last_check_result[pool] = result
+        if result.is_stale:
+            self._replica_pool_set.discard(pool)
+            self._stale_pool_set.add(pool)
+            logger.info(
+                "Pool %s marked as stale",
+                dsn.with_(password="******"),
+            )
+        else:
+            self._stale_pool_set.discard(pool)
+            if pool not in self._replica_pool_set:
+                await self._add_pool_to_replica_set(pool, dsn)
+                logger.info(
+                    "Pool %s recovered from stale",
+                    dsn.with_(password="******"),
+                )
+
+    async def collect_master_state(self, connection: ConnT):
+        if self._staleness:
+            ctx = self._make_check_context(connection)
+            await self._staleness.collect_master_state(ctx)
+
+    def mark_pool_stale(self, pool: PoolT) -> None:
+        self._replica_pool_set.discard(pool)
+        self._stale_pool_set.add(pool)
 
     def remove_pool_from_all_sets(self, pool: PoolT, dsn: Dsn):
         self._remove_pool_from_master_set(pool, dsn)
         self._remove_pool_from_replica_set(pool, dsn)
+        self._stale_pool_set.discard(pool)
+        self._last_check_result.pop(pool, None)
+        if self._staleness:
+            self._staleness.remove_pool(pool)
 
     def clear_sets(self):
         self._master_pool_set.clear()
         self._replica_pool_set.clear()
+        self._stale_pool_set.clear()
+        self._last_check_result.clear()
 
     # --- Pool registry ---
 
@@ -330,6 +410,7 @@ class PoolState(Generic[PoolT, ConnT]):
         return chain(
             iter(self._master_pool_set),
             iter(self._replica_pool_set),
+            iter(self._stale_pool_set),
         )
 
 

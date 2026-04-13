@@ -59,9 +59,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
         while not self._closing():
             try:
                 await asyncio.wait_for(
-                    self._pool_state.refresh_pool_role(
-                        pool, dsn, sys_connection,
-                    ),
+                    self._full_pool_check(pool, dsn, sys_connection),
                     timeout=self._refresh_timeout,
                 )
                 await self._pool_state.notify_pool_checked(dsn)
@@ -74,6 +72,30 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                 await self._pool_state.notify_pool_checked(dsn)
 
             await asyncio.sleep(self._refresh_delay)
+
+    async def _full_pool_check(
+        self,
+        pool: PoolT,
+        dsn: Dsn,
+        sys_connection: ConnT,
+    ):
+        was_stale = self._pool_state.pool_is_stale(pool)
+        await self._pool_state.refresh_pool_role(pool, dsn, sys_connection)
+        try:
+            if self._pool_state.pool_is_master(pool):
+                await self._pool_state.collect_master_state(sys_connection)
+            else:
+                await self._pool_state.check_replica_staleness(
+                    pool, dsn, sys_connection,
+                )
+        except Exception:
+            if was_stale and not self._pool_state.pool_is_master(pool):
+                self._pool_state.mark_pool_stale(pool)
+            logger.warning(
+                "Staleness check failed for dsn=%s",
+                dsn.with_(password="******"),
+                exc_info=True,
+            )
 
     async def _check_pool_task(self, index: int):
         logger.debug("Starting pool task")

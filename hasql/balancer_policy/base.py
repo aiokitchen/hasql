@@ -44,11 +44,24 @@ class AbstractBalancerPolicy(ABC, Generic[PoolT]):
         candidates: list[PoolT] = []
 
         if read_only:
-            candidates.extend(
-                await self._pool_state.get_replica_pools(
-                    fallback_master=fallback_master,
-                ),
-            )
+            if self._pool_state.replica_pool_count > 0:
+                candidates.extend(
+                    await self._pool_state.get_replica_pools(
+                        fallback_master=False,
+                    ),
+                )
+            elif fallback_master and self._pool_state.master_pool_count > 0:
+                candidates.extend(
+                    await self._pool_state.get_master_pools(),
+                )
+            elif self._pool_state.stale_pool_count > 0:
+                candidates.extend(self._pool_state.get_stale_pools())
+            else:
+                candidates.extend(
+                    await self._pool_state.get_replica_pools(
+                        fallback_master=fallback_master,
+                    ),
+                )
 
         if not read_only or (
             choose_master_as_replica

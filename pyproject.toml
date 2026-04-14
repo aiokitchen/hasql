@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=69", "wheel", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -81,10 +81,10 @@ Tracker = "https://github.com/aiokitchen/hasql/issues"
 Documentation = "https://github.com/aiokitchen/hasql/blob/master/README.rst"
 
 [tool.setuptools.dynamic]
-version = { attr = "hasql.__version__" }
+version = { attr = "hasql.version.__version__" }
 
 [tool.setuptools.packages.find]
-exclude = ["tests*", "example*"]
+include = ["hasql*"]
 
 [tool.setuptools.package-data]
 hasql = ["py.typed"]

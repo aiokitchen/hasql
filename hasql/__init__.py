@@ -1,5 +1,4 @@
-__version_info__ = (0, 10, 0)
-__version__ = ".".join(map(str, __version_info__))
+from hasql.version import __version__
 
 package_info = (
     "hasql is a module for acquiring actual connections with masters "

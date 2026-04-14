@@ -72,4 +72,4 @@ class AbstractBalancerPolicy(ABC, Generic[PoolT]):
 # Backward-compatible alias
 BaseBalancerPolicy = AbstractBalancerPolicy
 
-__all__ = ["AbstractBalancerPolicy", "BaseBalancerPolicy", "PoolT"]
+__all__ = ["AbstractBalancerPolicy", "BaseBalancerPolicy"]

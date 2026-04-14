@@ -1,12 +1,11 @@
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Generic, TypeVar
+from collections.abc import Callable
+from typing import Generic, TypeVar
 
 from .exceptions import PoolManagerClosingError
+from .pool_state import PoolState
 from .utils import Dsn
-
-if TYPE_CHECKING:
-    from .pool_manager import BasePoolManager
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +16,20 @@ ConnT = TypeVar("ConnT")
 class PoolHealthMonitor(Generic[PoolT, ConnT]):
     """Background health monitor that checks pool roles periodically."""
 
-    def __init__(self, manager: "BasePoolManager[PoolT, ConnT]"):
-        self._manager = manager
+    def __init__(
+        self,
+        pool_state: PoolState[PoolT, ConnT],
+        refresh_delay: float,
+        refresh_timeout: float,
+        closing_getter: Callable[[], bool],
+    ):
+        self._pool_state = pool_state
+        self._refresh_delay = refresh_delay
+        self._refresh_timeout = refresh_timeout
+        self._closing = closing_getter
         self._tasks: list[asyncio.Task] | None = [
             asyncio.create_task(self._check_pool_task(index))
-            for index in range(len(manager._pool_state.dsn))
+            for index in range(len(pool_state.dsn))
         ]
 
     @property
@@ -42,10 +50,34 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
 
             self._tasks = None
 
+    async def _periodic_pool_check(
+        self,
+        pool: PoolT,
+        dsn: Dsn,
+        sys_connection: ConnT,
+    ):
+        while not self._closing():
+            try:
+                await asyncio.wait_for(
+                    self._pool_state.refresh_pool_role(
+                        pool, dsn, sys_connection,
+                    ),
+                    timeout=self._refresh_timeout,
+                )
+                await self._pool_state.notify_pool_checked(dsn)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Periodic pool check failed for dsn=%s",
+                    dsn.with_(password="******"),
+                )
+                self._pool_state.remove_pool_from_all_sets(pool, dsn)
+                await self._pool_state.notify_pool_checked(dsn)
+
+            await asyncio.sleep(self._refresh_delay)
+
     async def _check_pool_task(self, index: int):
         logger.debug("Starting pool task")
-        manager = self._manager
-        pool_state = manager._pool_state
+        pool_state = self._pool_state
         dsn = pool_state.dsn[index]
         censored_dsn = str(dsn.with_(password="******"))
         pool = await self._wait_creating_pool(dsn)
@@ -53,7 +85,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
 
         logger.debug("Setting dsn=%r event", censored_dsn)
         sys_connection: ConnT | None = None
-        while not manager._closing:
+        while not self._closing():
             try:
                 # Don't use async with — we need a custom timeout
                 logger.debug(
@@ -62,17 +94,13 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                 )
                 sys_connection = await asyncio.wait_for(
                     pool_state.acquire_from_pool(pool),
-                    timeout=manager._refresh_timeout,
+                    timeout=self._refresh_timeout,
                 )
 
                 logger.debug("Checking dsn=%r", censored_dsn)
                 if sys_connection is None:
                     continue
-                await manager._periodic_pool_check(
-                    pool,
-                    dsn,
-                    sys_connection,
-                )
+                await self._periodic_pool_check(pool, dsn, sys_connection)
             except asyncio.TimeoutError:
                 logger.warning(
                     "Creating system connection failed for dsn=%r",
@@ -80,7 +108,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                 )
                 pool_state.remove_pool_from_all_sets(pool, dsn)
             except asyncio.CancelledError as cancelled_error:
-                if manager._closing:
+                if self._closing():
                     raise cancelled_error from None
                 logger.warning(
                     "Cancelled error for dsn=%r",
@@ -103,16 +131,15 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                     sys_connection = None
                 await pool_state.notify_pool_checked(dsn)
 
-            await asyncio.sleep(manager._refresh_delay)
+            await asyncio.sleep(self._refresh_delay)
 
     async def _safe_release_connection(
         self, connection: ConnT, pool: PoolT, censored_dsn: str,
     ):
-        manager = self._manager
         try:
-            await manager._pool_state.release_to_pool(connection, pool)
+            await self._pool_state.release_to_pool(connection, pool)
         except asyncio.CancelledError as cancelled_error:
-            if manager._closing:
+            if self._closing():
                 raise cancelled_error from None
             logger.warning(
                 "Release connection to pool with "
@@ -129,13 +156,12 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
             )
 
     async def _wait_creating_pool(self, dsn: Dsn) -> PoolT:
-        manager = self._manager
-        pool_state = manager._pool_state
-        while not manager._closing:
+        pool_state = self._pool_state
+        while not self._closing():
             try:
                 return await asyncio.wait_for(
                     pool_state.pool_factory(dsn),
-                    timeout=manager._refresh_timeout,
+                    timeout=self._refresh_timeout,
                 )
             except Exception:
                 logger.warning(
@@ -143,7 +169,7 @@ class PoolHealthMonitor(Generic[PoolT, ConnT]):
                     dsn.with_(password="******"),
                     exc_info=True,
                 )
-                await asyncio.sleep(manager._refresh_delay)
+                await asyncio.sleep(self._refresh_delay)
         raise PoolManagerClosingError("Pool manager is closing")
 
 

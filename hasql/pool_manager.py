@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Sequence
 from typing import (
     Generic,
     TypeVar,
@@ -66,7 +67,6 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         self._balancer: AbstractBalancerPolicy[PoolT] | None = (
             balancer_policy(self._pool_state)
         )
-        self._health: PoolHealthMonitor[PoolT, ConnT] = PoolHealthMonitor(self)
 
         self._acquire_timeout = acquire_timeout
         self._refresh_delay = refresh_delay
@@ -78,10 +78,90 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         self._closing = False
         self._closed = False
 
-    # --- Public proxy methods/properties for pool_state ---
+        self._health: PoolHealthMonitor[PoolT, ConnT] = PoolHealthMonitor(
+            pool_state=self._pool_state,
+            refresh_delay=refresh_delay,
+            refresh_timeout=refresh_timeout,
+            closing_getter=lambda: self._closing,
+        )
+
+    # --- Public pool-state proxy properties ---
+
+    @property
+    def dsn(self) -> Sequence[Dsn]:
+        return self._pool_state.dsn
+
+    @property
+    def master_pool_count(self) -> int:
+        return self._pool_state.master_pool_count
+
+    @property
+    def replica_pool_count(self) -> int:
+        return self._pool_state.replica_pool_count
+
+    @property
+    def available_pool_count(self) -> int:
+        return self._pool_state.available_pool_count
+
+    @property
+    def pools(self) -> Sequence[PoolT | None]:
+        return self._pool_state.pools
+
+    @property
+    def closing(self) -> bool:
+        return self._closing
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    @property
+    def balancer(self) -> AbstractBalancerPolicy[PoolT] | None:
+        return self._balancer
+
+    @property
+    def refresh_delay(self) -> float:
+        return self._refresh_delay
+
+    @property
+    def refresh_timeout(self) -> float:
+        return self._refresh_timeout
+
+    # --- Public pool-state proxy methods ---
+
+    def pool_is_master(self, pool: PoolT) -> bool:
+        return self._pool_state.pool_is_master(pool)
+
+    def pool_is_replica(self, pool: PoolT) -> bool:
+        return self._pool_state.pool_is_replica(pool)
+
+    def get_pool_freesize(self, pool: PoolT) -> int:
+        return self._pool_state.get_pool_freesize(pool)
+
+    def get_last_response_time(self, pool: PoolT) -> float | None:
+        return self._pool_state.get_last_response_time(pool)
+
+    async def get_master_pools(self) -> list[PoolT]:
+        return await self._pool_state.get_master_pools()
+
+    async def get_replica_pools(
+        self, fallback_master: bool = False,
+    ) -> list[PoolT]:
+        return await self._pool_state.get_replica_pools(
+            fallback_master=fallback_master,
+        )
+
+    async def wait_next_pool_check(self, timeout: int = 10) -> None:
+        await self._pool_state.wait_next_pool_check(timeout)
+
+    async def wait_all_ready(self) -> None:
+        await self._pool_state.wait_all_ready()
 
     async def wait_masters_ready(self, masters_count: int) -> None:
         await self._pool_state.wait_masters_ready(masters_count)
+
+    async def wait_replicas_ready(self, replicas_count: int) -> None:
+        await self._pool_state.wait_replicas_ready(replicas_count)
 
     async def ready(
         self,
@@ -94,10 +174,6 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             replicas_count=replicas_count,
             timeout=timeout,
         )
-
-    @property
-    def available_pool_count(self) -> int:
-        return self._pool_state.available_pool_count
 
     # --- Metrics ---
 
@@ -235,6 +311,15 @@ class BasePoolManager(Generic[PoolT, ConnT]):
     def _unregister_connection(self, connection: ConnT) -> None:
         self._unmanaged_connections.pop(connection, None)
 
+    # --- Release (public, for await-pattern users) ---
+
+    async def release(self, connection: ConnT, **kwargs) -> None:
+        pool = self._unmanaged_connections.pop(connection, None)
+        if pool is None:
+            return
+        self._metrics.remove_connection(self._pool_state.host(pool))
+        await self._pool_state.release_to_pool(connection, pool, **kwargs)
+
     # --- Lifecycle ---
 
     async def close(self):
@@ -244,6 +329,21 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         await asyncio.gather(
             *[
                 pool_state.close_pool(pool)
+                for pool in pool_state.pools
+                if pool is not None
+            ],
+            return_exceptions=True,
+        )
+        self._closing = False
+        self._closed = True
+
+    async def terminate(self):
+        self._closing = True
+        await self._clear()
+        pool_state = self._pool_state
+        await asyncio.gather(
+            *[
+                pool_state.terminate_pool(pool)
                 for pool in pool_state.pools
                 if pool is not None
             ],
@@ -269,31 +369,6 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         await asyncio.gather(*release_tasks, return_exceptions=True)
 
         self._pool_state.clear_sets()
-
-    async def _periodic_pool_check(
-        self,
-        pool: PoolT,
-        dsn: Dsn,
-        sys_connection: ConnT,
-    ):
-        while not self._closing:
-            try:
-                await asyncio.wait_for(
-                    self._pool_state.refresh_pool_role(
-                        pool, dsn, sys_connection,
-                    ),
-                    timeout=self._refresh_timeout,
-                )
-                await self._pool_state.notify_pool_checked(dsn)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "Periodic pool check failed for dsn=%s",
-                    dsn.with_(password="******"),
-                )
-                self._pool_state.remove_pool_from_all_sets(pool, dsn)
-                await self._pool_state.notify_pool_checked(dsn)
-
-            await asyncio.sleep(self._refresh_delay)
 
     async def __aenter__(self):
         await self._pool_state.ready()

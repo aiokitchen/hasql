@@ -317,3 +317,30 @@ async def test_round_robin_master_with_fallback_and_no_replicas(
     async with timeout(1):
         async with pool_manager.acquire_master() as conn:
             assert await conn.is_master()
+
+
+@balancer_policies
+async def test_master_as_replica_weight_nonzero_with_no_replicas(
+    make_pool_manager,
+    balancer_policy,
+):
+    """weight > 0 with replica_count=0 must still return master.
+
+    _get_candidates has a guard: the choose_master_as_replica branch that
+    adds masters directly is skipped when replica_pool_count == 0.
+    Masters must still be reachable via get_replica_pools(fallback_master=True),
+    which is activated because get_pool() sets fallback_master=choose_master_as_replica.
+    """
+    pool_manager = await make_pool_manager(balancer_policy, replicas_count=0)
+    async with timeout(1):
+        await pool_manager.ready()
+
+    assert pool_manager.replica_pool_count == 0
+
+    # weight=1.0 makes choose_master_as_replica deterministically True
+    pool = await pool_manager._balancer.get_pool(
+        read_only=True,
+        master_as_replica_weight=1.0,
+    )
+    assert pool is not None
+    assert pool_manager.pool_is_master(pool)

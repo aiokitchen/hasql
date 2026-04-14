@@ -83,7 +83,7 @@ Documentation = "https://github.com/aiokitchen/hasql/blob/master/README.rst"
 version = { attr = "hasql.version.__version__" }
 
 [tool.setuptools.packages.find]
-exclude = ["tests*", "example*"]
+include = ["hasql*"]
 
 [tool.setuptools.package-data]
 hasql = ["py.typed"]

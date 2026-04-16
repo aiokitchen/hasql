@@ -27,9 +27,7 @@ async def test_hasql_context_metrics(pool_manager_factory, pg_dsn):
             metrics = pool_manager.metrics().hasql
             assert metrics == HasqlMetrics(
                 pool=1,
-                acquire={pool_manager._pool_state.host(
-                    pool_manager._pool_state.pools[0],
-                ): 1},
+                acquire={pool_manager.host(pool_manager.pools[0]): 1},
                 pool_time=mock.ANY,
                 acquire_time=mock.ANY,
                 add_connections=mock.ANY,
@@ -41,9 +39,7 @@ async def test_hasql_context_metrics(pool_manager_factory, pg_dsn):
         metrics = pool_manager.metrics().hasql
         assert metrics == HasqlMetrics(
             pool=1,
-            acquire={pool_manager._pool_state.host(
-                    pool_manager._pool_state.pools[0],
-                ): 1},
+            acquire={pool_manager.host(pool_manager.pools[0]): 1},
             pool_time=mock.ANY,
             acquire_time=mock.ANY,
             add_connections=mock.ANY,
@@ -65,27 +61,25 @@ async def test_hasql_context_metrics(pool_manager_factory, pg_dsn):
 )
 async def test_hasql_metrics(pool_manager_factory, pg_dsn):
     async with pool_manager_factory(pg_dsn) as pool_manager:
-        async with pool_manager.acquire_master() as _conn:
-            metrics = pool_manager.metrics().hasql
-            assert metrics == HasqlMetrics(
-                pool=1,
-                acquire={pool_manager._pool_state.host(
-                        pool_manager._pool_state.pools[0],
-                    ): 1},
-                pool_time=mock.ANY,
-                acquire_time=mock.ANY,
-                add_connections=mock.ANY,
-                remove_connections=mock.ANY,
-            )
-            assert list(metrics.add_connections.values()) == [1]
-            assert metrics.remove_connections == {}
+        _conn = await pool_manager.acquire_master()
+        metrics = pool_manager.metrics().hasql
+        assert metrics == HasqlMetrics(
+            pool=1,
+            acquire={pool_manager.host(pool_manager.pools[0]): 1},
+            pool_time=mock.ANY,
+            acquire_time=mock.ANY,
+            add_connections=mock.ANY,
+            remove_connections=mock.ANY,
+        )
+        assert list(metrics.add_connections.values()) == [1]
+        assert metrics.remove_connections == {}
+
+        await pool_manager.release(connection=_conn)
 
         metrics = pool_manager.metrics().hasql
         assert metrics == HasqlMetrics(
             pool=1,
-            acquire={pool_manager._pool_state.host(
-                    pool_manager._pool_state.pools[0],
-                ): 1},
+            acquire={pool_manager.host(pool_manager.pools[0]): 1},
             pool_time=mock.ANY,
             acquire_time=mock.ANY,
             add_connections=mock.ANY,
@@ -113,9 +107,7 @@ async def test_hasql_close_metrics(pool_manager_factory, pg_dsn):
         metrics = pool_manager.metrics().hasql
         assert metrics == HasqlMetrics(
             pool=1,
-            acquire={pool_manager._pool_state.host(
-                    pool_manager._pool_state.pools[0],
-                ): 1},
+            acquire={pool_manager.host(pool_manager.pools[0]): 1},
             pool_time=mock.ANY,
             acquire_time=mock.ANY,
             add_connections=mock.ANY,

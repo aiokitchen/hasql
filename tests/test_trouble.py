@@ -30,25 +30,30 @@ async def test_unavailable_db(pool_manager_factory, localhost, db_server_port):
             pass
 
 
+_AIOSQA = "hasql.driver.asyncsqlalchemy.AsyncSqlAlchemyDriver"
+
+
 @pytest.mark.parametrize(
-    "pool_manager_factory,name",
+    "pool_manager_factory,driver_class",
     [
-        (setup_aiopg, "aiopg"),
-        (setup_aiopgsa, "aiopg_sa"),
-        (setup_asyncpg, "asyncpg"),
-        (setup_asyncsqlalchemy, "asyncsqlalchemy"),
-        (setup_psycopg3, "psycopg3"),
+        (setup_aiopg, "hasql.driver.aiopg.AiopgDriver"),
+        (setup_aiopgsa, "hasql.driver.aiopg_sa.AiopgSaDriver"),
+        (setup_asyncpg, "hasql.driver.asyncpg.AsyncpgDriver"),
+        (setup_asyncsqlalchemy, _AIOSQA),
+        (setup_psycopg3, "hasql.driver.psycopg3.Psycopg3Driver"),
     ],
 )
-async def test_catch_cancelled_error(pool_manager_factory, pg_dsn, name):
+async def test_catch_cancelled_error(
+    pool_manager_factory, pg_dsn, driver_class,
+):
     async with pool_manager_factory(pg_dsn) as pool_manager:
-        await pool_manager.ready()
-        assert pool_manager.available_pool_count > 0
+        await pool_manager._pool_state.ready()
+        assert pool_manager._pool_state.available_pool_count > 0
         with mock.patch(
-            f"hasql.{name}.PoolManager._is_master",
+            f"{driver_class}.is_master",
             side_effect=asyncio.CancelledError(),
         ):
-            await pool_manager.wait_next_pool_check()
-            assert pool_manager.available_pool_count == 0
-        await pool_manager.wait_next_pool_check()
-        assert pool_manager.available_pool_count > 0
+            await pool_manager._pool_state.wait_next_pool_check()
+            assert pool_manager._pool_state.available_pool_count == 0
+        await pool_manager._pool_state.wait_next_pool_check()
+        assert pool_manager._pool_state.available_pool_count > 0

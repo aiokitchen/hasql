@@ -33,7 +33,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
   "Programming Language :: Python",
 ]
-dependencies = ["packaging"]
+dependencies = []
 
 [dependency-groups]
 aiopg = ["aiopg"]

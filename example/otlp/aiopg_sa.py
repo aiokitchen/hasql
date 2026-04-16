@@ -31,7 +31,7 @@ async def main():
         args.dsn,
         fallback_master=True,
     )
-    await pool.pool_state.ready()
+    await pool.ready()
     register_hasql_metrics(pool)
 
     print(f"Exporting metrics every {args.interval}s. Press Ctrl+C to stop.")

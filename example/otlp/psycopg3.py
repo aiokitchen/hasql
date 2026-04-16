@@ -51,7 +51,7 @@ async def main():
         fallback_master=True,
         pool_factory_kwargs={"min_size": 2, "max_size": 10},
     )
-    await pool.pool_state.ready()
+    await pool.ready()
     register_hasql_metrics(pool)
     register_extra_gauges(pool, PSYCOPG3_EXTRA_KEYS)
 

@@ -8,7 +8,7 @@
 | `from hasql.base import BasePoolManager, TimeoutAcquireContext` | **None** — re-exports preserved |
 | Subclass `BasePoolManager` to add a custom driver | **Rewrite** — extract driver into `PoolDriver` subclass |
 | Override `_prepare_acquire_kwargs` | **Rewrite** — use explicit `timeout` parameter |
-| `pool.ready()`, `pool.get_master_pools()`, etc. | **Update** — `ready()` and `wait_masters_ready()` are proxied on manager; others via `pool._pool_state.*` |
+| `pool.ready()`, `pool.get_master_pools()`, etc. | **None** — all public methods are proxied on the manager |
 | Patch `_is_master` / `_pool_factory` in tests | **Update** — patch on driver via `_pool_state.driver` |
 | Access `_refresh_role_tasks` | **Update** — use `_health.tasks` |
 | Call `_notify_about_pool_has_checked` | **Update** — use `_pool_state.notify_pool_checked` |
@@ -55,8 +55,9 @@ BasePoolManager (concrete)     (has-a PoolDriver)
 | `hasql.driver.*` | Driver implementations + PoolManager wrappers |
 
 Old import paths from `hasql.base` continue to work via re-exports.
-Driver import paths (`hasql.aiopg`, `hasql.asyncpg`, etc.) have moved to
-`hasql.driver.*` and must be updated (see below).
+Driver import paths (`hasql.aiopg`, `hasql.asyncpg`, etc.) still work via
+backward-compatible re-export shims but are deprecated. New code should
+import from `hasql.driver.*` (see below).
 
 ---
 
@@ -107,7 +108,7 @@ with mock.patch.object(
 
 Driver-specific `PoolManager` classes have moved from `hasql.<driver>` to
 `hasql.driver.<driver>`. The old modules (`hasql.aiopg`, `hasql.asyncpg`, etc.)
-no longer exist.
+still work via re-export shims but are deprecated.
 
 ```python
 # Old (0.9.0)                              # New (0.10.0)
@@ -131,44 +132,33 @@ async with PoolManager("postgresql://master,replica/db") as pool:
 
 ### 2. Pool state methods
 
-`ready()` and `wait_masters_ready()` are proxied directly on the manager.
-Other pool-state methods are accessible via `pool._pool_state`.
+All pool-state methods are proxied directly on the manager — no changes needed:
 
-| Old (0.9.0) | New (0.10.0) |
+| Method | Status |
 |---|---|
-| `pool.ready()` | `pool.ready()` or `async with pool:` |
-| `pool.wait_masters_ready(n)` | `pool.wait_masters_ready(n)` |
-| `pool.available_pool_count` | `pool.available_pool_count` |
-| `pool.get_master_pools()` | `pool._pool_state.get_master_pools()` |
-| `pool.get_replica_pools()` | `pool._pool_state.get_replica_pools()` |
-| `pool.wait_all_ready()` | `pool._pool_state.wait_all_ready()` |
-| `pool.wait_replicas_ready(n)` | `pool._pool_state.wait_replicas_ready(n)` |
-| `pool.wait_next_pool_check()` | `pool._pool_state.wait_next_pool_check()` |
-
-**Before (0.9.0):**
-
-```python
-pool = PoolManager("postgresql://master,replica/db")
-await pool.ready()
-
-masters = await pool.get_master_pools()
-```
-
-**After (0.10.0):**
-
-```python
-pool = PoolManager("postgresql://master,replica/db")
-await pool.ready()
-
-masters = await pool._pool_state.get_master_pools()
-```
-
-Or use the context manager, which calls `ready()` automatically:
-
-```python
-async with PoolManager("postgresql://master,replica/db") as pool:
-    ...
-```
+| `pool.ready()` | Unchanged (also available via `async with pool:`) |
+| `pool.wait_masters_ready(n)` | Unchanged |
+| `pool.wait_replicas_ready(n)` | Unchanged |
+| `pool.wait_all_ready()` | Unchanged |
+| `pool.wait_next_pool_check()` | Unchanged |
+| `pool.available_pool_count` | Unchanged |
+| `pool.master_pool_count` | Unchanged |
+| `pool.replica_pool_count` | Unchanged |
+| `pool.get_master_pools()` | Unchanged |
+| `pool.get_replica_pools()` | Unchanged |
+| `pool.pool_is_master(p)` | Unchanged |
+| `pool.pool_is_replica(p)` | Unchanged |
+| `pool.get_pool_freesize(p)` | Unchanged |
+| `pool.get_last_response_time(p)` | Unchanged |
+| `pool.dsn` | Unchanged |
+| `pool.pools` | Unchanged |
+| `pool.closing` | Unchanged |
+| `pool.closed` | Unchanged |
+| `pool.balancer` | Unchanged |
+| `pool.refresh_delay` | Unchanged |
+| `pool.refresh_timeout` | Unchanged |
+| `pool.release(conn)` | Unchanged |
+| `pool.terminate()` | Unchanged |
 
 ### 3. Custom BasePoolManager subclasses
 
@@ -380,14 +370,7 @@ The following have been removed from `BasePoolManager`'s public API in 0.10.0:
 | Removed | Replacement |
 |---|---|
 | `pool.driver` | `pool._pool_state.driver` |
-| `pool.refresh_delay` | Internal `pool._refresh_delay` |
-| `pool.refresh_timeout` | Internal `pool._refresh_timeout` |
 | `pool.pool_factory_kwargs` | `pool._pool_state.pool_factory_kwargs` |
-| `pool.balancer` | Internal `pool._balancer` |
-| `pool.closing` | Internal `pool._closing` |
-| `pool.closed` | Internal `pool._closed` |
-| `pool.release(conn)` | Use context managers (`async with pool.acquire_master()`) |
-| `pool.terminate()` | Use `pool.close()` |
 | `pool.host(p)` | `pool._pool_state.host(p)` |
 | `pool.is_connection_closed(c)` | `pool._pool_state.is_connection_closed(c)` |
 | `pool.acquire_from_pool(p)` | `pool._pool_state.acquire_from_pool(p)` |
@@ -395,6 +378,10 @@ The following have been removed from `BasePoolManager`'s public API in 0.10.0:
 | `pool.register_connection(c, p)` | Internal `pool._register_connection(c, p)` |
 | `pool.unregister_connection(c)` | Internal `pool._unregister_connection(c)` |
 | `iter(pool)` | `iter(pool._pool_state)` |
+
+The following are **still public** on `BasePoolManager`: `refresh_delay`,
+`refresh_timeout`, `balancer`, `closing`, `closed`, `release(conn)`,
+`terminate()`.
 
 ### 8. Metrics: `PoolMetrics` replaces `DriverMetrics`
 
@@ -406,15 +393,17 @@ returns `PoolMetrics` objects enriched with context the pool manager already kno
 @dataclass(frozen=True)
 class PoolMetrics:
     host: str
-    role: Optional[str]            # "master" | "replica" | None
+    role: PoolRole | None          # PoolRole.MASTER | PoolRole.REPLICA | None
     healthy: bool
     min: int
     max: int
     idle: int
     used: int
-    response_time: Optional[float] # health-check RTT
+    response_time: float | None    # health-check RTT
     in_flight: int                 # connections currently checked out
-    extra: Dict[str, Any]          # driver-specific data
+    staleness: PoolStaleness | None = None  # PoolStaleness.FRESH | .STALE
+    lag: dict[str, Any] = {}       # staleness lag data (e.g. {"bytes": 1024})
+    extra: dict[str, Any] = {}     # driver-specific data
 ```
 
 **Before (0.9.0):**
@@ -449,6 +438,8 @@ class HasqlGauges:
     active_connections: int
     closing: bool
     closed: bool
+    stale_count: int = 0
+    unavailable_count: int = 0
 ```
 
 ```python
@@ -505,8 +496,8 @@ async def test_my_driver():
 
 Pool state management has been extracted from `BasePoolManager` into a dedicated
 `PoolState` class (`hasql/pool_state.py`), accessible via the private `_pool_state`
-attribute. The most commonly used methods (`ready()`, `wait_masters_ready()`,
-`available_pool_count`) are proxied directly on the manager. See
+attribute. All public pool-state methods and properties are proxied directly on
+the manager, so the public API is unchanged. See
 [section 2](#2-pool-state-methods) for the full list.
 
 Balancer policies now depend on the `PoolStateProvider` protocol instead

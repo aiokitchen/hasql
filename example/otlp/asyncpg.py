@@ -32,7 +32,7 @@ async def main():
         fallback_master=True,
         pool_factory_kwargs={"min_size": 2, "max_size": 10},
     )
-    await pool.pool_state.ready()
+    await pool.ready()
     register_hasql_metrics(pool)
 
     print(f"Exporting metrics every {args.interval}s. Press Ctrl+C to stop.")

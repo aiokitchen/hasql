@@ -40,7 +40,7 @@ async def main():
         fallback_master=True,
         pool_factory_kwargs={"pool_size": 10},
     )
-    await pool.pool_state.ready()
+    await pool.ready()
     register_hasql_metrics(pool)
     register_extra_gauges(pool, ["overflow"])
 

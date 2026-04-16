@@ -329,7 +329,8 @@ async def test_master_as_replica_weight_nonzero_with_no_replicas(
     _get_candidates has a guard: the choose_master_as_replica branch that
     adds masters directly is skipped when replica_pool_count == 0.
     Masters must still be reachable via get_replica_pools(fallback_master=True),
-    which is activated because get_pool() sets fallback_master=choose_master_as_replica.
+    which is activated because get_pool() sets
+    fallback_master=choose_master_as_replica.
     """
     pool_manager = await make_pool_manager(balancer_policy, replicas_count=0)
     async with timeout(1):

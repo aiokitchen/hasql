@@ -3,11 +3,9 @@ import re
 import statistics
 import time
 from collections import defaultdict, deque
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
-from typing import (
-    Any, DefaultDict, Deque, Dict, Generator, Iterable, List, Optional, Tuple,
-    Union,
-)
+from typing import Any, Generic, TypeVar
 from urllib.parse import unquote, urlencode
 
 
@@ -34,9 +32,9 @@ class Dsn:
     def __init__(
         self,
         netloc: str,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        dbname: Optional[str] = None,
+        user: str | None = None,
+        password: str | None = None,
+        dbname: str | None = None,
         scheme: str = "postgresql",
         **kwargs: Any,
     ):
@@ -84,7 +82,7 @@ class Dsn:
         return cls._parse_connection_string(dsn)
 
     @classmethod
-    def _parse_connection_string_params(cls, conn_str: str) -> Dict[str, str]:
+    def _parse_connection_string_params(cls, conn_str: str) -> dict[str, str]:
         """Parse key=value pairs from connection string."""
         params = {}
         current_key = None
@@ -199,12 +197,13 @@ class Dsn:
 
     def with_(
         self,
-        netloc: Optional[str] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        dbname: Optional[str] = None,
+        netloc: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        dbname: str | None = None,
     ) -> "Dsn":
         params = {
+            "scheme": self._scheme,
             "netloc": netloc if netloc is not None else self._netloc,
             "user": user if user is not None else self._user,
             "password": password if password is not None else self._password,
@@ -227,20 +226,20 @@ class Dsn:
         return self._netloc
 
     @property
-    def user(self) -> Optional[str]:
+    def user(self) -> str | None:
         return self._user
 
     @property
-    def password(self) -> Optional[str]:
+    def password(self) -> str | None:
         return self._password
 
     @property
-    def dbname(self) -> Optional[str]:
+    def dbname(self) -> str | None:
         return self._dbname
 
     @property
-    def params(self) -> Dict[str, str]:
-        return self._kwargs
+    def params(self) -> dict[str, str]:
+        return dict(self._kwargs)
 
     @property
     def scheme(self) -> str:
@@ -251,13 +250,13 @@ class Dsn:
         return self._compiled_dsn
 
 
-def split_dsn(dsn: Union[Dsn, str], default_port: int = 5432) -> List[Dsn]:
+def split_dsn(dsn: Dsn | str, default_port: int = 5432) -> list[Dsn]:
     if not isinstance(dsn, Dsn):
         dsn = Dsn.parse(dsn)
 
-    host_port_pairs: List[Tuple[str, Optional[int]]] = []
+    host_port_pairs: list[tuple[str, int | None]] = []
     port_count = 0
-    port: Optional[int]
+    port: int | None
     for host in dsn.netloc.split(","):
         if ":" in host:
             host, port_str = host.rsplit(":", 1)
@@ -268,7 +267,7 @@ def split_dsn(dsn: Union[Dsn, str], default_port: int = 5432) -> List[Dsn]:
             port = None
         host_port_pairs.append((host, port))
 
-    def deduplicate(dsns: Iterable[Dsn]) -> List[Dsn]:
+    def deduplicate(dsns: Iterable[Dsn]) -> list[Dsn]:
         cache = set()
         result = []
         for dsn in dsns:
@@ -297,14 +296,17 @@ def split_dsn(dsn: Union[Dsn, str], default_port: int = 5432) -> List[Dsn]:
     )
 
 
-class Stopwatch:
+KeyT = TypeVar("KeyT")
+
+
+class Stopwatch(Generic[KeyT]):
     def __init__(self, window_size: int):
-        self._times: DefaultDict[Any, Deque] = defaultdict(
+        self._times: defaultdict[KeyT, deque[float]] = defaultdict(
             lambda: deque(maxlen=window_size),
         )
-        self._cache: Dict[Any, Optional[int]] = {}
+        self._cache: dict[KeyT, float | None] = {}
 
-    def get_time(self, obj: Any) -> Optional[float]:
+    def get_time(self, obj: KeyT) -> float | None:
         if obj not in self._times:
             return None
         if self._cache.get(obj) is None:
@@ -312,7 +314,7 @@ class Stopwatch:
         return self._cache[obj]
 
     @contextmanager
-    def __call__(self, obj: Any) -> Generator[None, None, None]:
+    def __call__(self, obj: KeyT) -> Generator[None, None, None]:
         start_at = time.monotonic()
         yield
         self._times[obj].append(time.monotonic() - start_at)

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import (
+    Any,
     Generic,
     TypeVar,
 )
@@ -24,8 +25,10 @@ from .metrics import (
     Metrics,
     PoolMetrics,
     PoolRole,
+    PoolStaleness,
 )
 from .pool_state import PoolState
+from .staleness import StalenessPolicy
 from .utils import split_dsn
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
         balancer_policy: type[AbstractBalancerPolicy] = GreedyBalancerPolicy,
         stopwatch_window_size: int = DEFAULT_STOPWATCH_WINDOW_SIZE,
         pool_factory_kwargs: dict | None = None,
+        staleness: StalenessPolicy | None = None,
     ):
         if not issubclass(balancer_policy, AbstractBalancerPolicy):
             raise ValueError(
@@ -61,6 +65,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             driver=driver,
             stopwatch_window_size=stopwatch_window_size,
             pool_factory_kwargs=pool_factory_kwargs,
+            staleness=staleness,
         )
 
         self._balancer: AbstractBalancerPolicy[PoolT] | None = (
@@ -121,6 +126,26 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             else:
                 role = None
 
+            staleness = None
+            lag: dict[str, Any] = {}
+            if role == PoolRole.REPLICA:
+                check_result = pool_state.get_last_check_result(pool)
+                if check_result is not None:
+                    staleness = (
+                        PoolStaleness.FRESH
+                        if not check_result.is_stale
+                        else PoolStaleness.STALE
+                    )
+                    lag = check_result.lag
+                else:
+                    staleness = PoolStaleness.FRESH
+            elif pool_state.pool_is_stale(pool):
+                role = PoolRole.REPLICA
+                check_result = pool_state.get_last_check_result(pool)
+                staleness = PoolStaleness.STALE
+                if check_result is not None:
+                    lag = check_result.lag
+
             in_flight = sum(
                 1 for p in self._unmanaged_connections.values() if p is pool
             )
@@ -135,6 +160,8 @@ class BasePoolManager(Generic[PoolT, ConnT]):
                 used=stats.used,
                 response_time=pool_state.get_last_response_time(pool),
                 in_flight=in_flight,
+                staleness=staleness,
+                lag=lag,
                 extra=stats.extra,
             ))
 
@@ -145,6 +172,7 @@ class BasePoolManager(Generic[PoolT, ConnT]):
             active_connections=len(self._unmanaged_connections),
             closing=self._closing,
             closed=self._closed,
+            stale_count=pool_state.stale_pool_count,
             unavailable_count=(
                 len([p for p in pool_state.pools if p is not None])
                 - pool_state.available_pool_count

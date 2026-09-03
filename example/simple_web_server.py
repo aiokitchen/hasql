@@ -6,7 +6,7 @@ from aiohttp.web_urldispatcher import View
 from aiomisc import entrypoint
 from aiomisc.service.aiohttp import AIOHTTPService
 
-from hasql.aiopg import PoolManager
+from hasql.driver.aiopg import PoolManager
 
 parser = argparse.ArgumentParser()
 group = parser.add_argument_group('HTTP options')
@@ -48,7 +48,7 @@ class ReplicaHandler(BaseView):
 class MetricsHandler(BaseView):
     async def get(self):
         metrics = self.pool.metrics()
-        return aiohttp.web.json_response([asdict(m) for m in metrics])
+        return aiohttp.web.json_response(asdict(metrics))
 
 
 class REST(AIOHTTPService):

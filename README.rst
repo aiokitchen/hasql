@@ -80,7 +80,7 @@ Code example using ``aiopg``:
 
 .. code-block:: python
 
-    from hasql.aiopg import PoolManager
+    from hasql.driver.aiopg import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -101,7 +101,7 @@ Code example using ``aiopg.sa``:
 
 .. code-block:: python
 
-    from hasql.aiopg_sa import PoolManager
+    from hasql.driver.aiopg_sa import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -125,7 +125,7 @@ For ``asyncpg``
 
 .. code-block:: python
 
-    from hasql.asyncpg import PoolManager
+    from hasql.driver.asyncpg import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -149,7 +149,7 @@ For ``sqlalchemy``
 
 .. code-block:: python
 
-    from hasql.asyncsqlalchemy import PoolManager
+    from hasql.driver.asyncsqlalchemy import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -186,7 +186,7 @@ For ``asyncpgsa``
 
 .. code-block:: python
 
-    from hasql.asyncpgsa import PoolManager
+    from hasql.driver.asyncpgsa import PoolManager
 
     hosts = ",".join([
         "master-host:5432",
@@ -200,10 +200,7 @@ For ``asyncpgsa``
         pool = PoolManager(multihost_dsn)
 
         # Waiting for 1 master and 1 replica will be available
-        await asyncio.gather(
-            pool.wait_masters_ready(1),
-            pool.wait_replicas_ready(1)
-        )
+        await pool.ready(masters_count=1, replicas_count=1)
         return pool
 
 
@@ -218,7 +215,7 @@ default queue behavior is used.
 
 .. code-block:: python
 
-    from hasql.psycopg3 import PoolManager
+    from hasql.driver.psycopg3 import PoolManager
 
 
     hosts = ",".join([
@@ -279,27 +276,6 @@ or
         async with pool.acquire_replica() as connection:
             ...
 
-Without context manager (really not recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    async def do_something():
-        pool = await create_pool(multihost_dsn)
-        connection = await pool.acquire(read_only=False)
-        await pool.release(connection)
-
-or more useful
-
-.. code-block:: python
-
-    async def do_something():
-        pool = await create_pool(multihost_dsn)
-        try:
-            connection = await pool.acquire(read_only=False)
-        finally:
-            await pool.release(connection)
-
 How it works?
 =============
 
@@ -319,88 +295,539 @@ broken (the details of implementing PostgreSQL).
 If there are no available hosts, the methods acquire(), acquire_master(), and
 acquire_replica() wait until the host with the desired role startup.
 
+Balancer Policies
+*****************
+
+When multiple pools match the requested role (e.g. several healthy replicas),
+hasql uses a balancer policy to choose which pool to acquire a connection from.
+The policy is set via the ``balancer_policy`` parameter of ``PoolManager``.
+
+``GreedyBalancerPolicy`` (default)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Picks the pool with the most free connections. When several pools are tied,
+chooses randomly among them.
+
+Best for workloads where you want to fill up idle pools first and avoid
+acquiring from pools that are already under pressure.
+
+``RoundRobinBalancerPolicy``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cycles through available pools in order, giving each pool an equal share
+of requests regardless of pool state or host performance.
+
+Best for uniform workloads where all replicas have similar hardware and
+you want simple, predictable distribution.
+
+``RandomWeightedBalancerPolicy``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retains the historical response-time weighting algorithm for compatibility.
+Its distribution and fairness characteristics are not guaranteed. Prefer
+``GreedyBalancerPolicy`` or ``RoundRobinBalancerPolicy`` when predictable
+selection semantics are required; changing this algorithm is deferred to a
+separate follow-up.
+
+.. list-table:: Policy Comparison
+   :header-rows: 1
+   :widths: 25 25 25 25
+
+   * - Property
+     - Greedy
+     - RoundRobin
+     - RandomWeighted
+   * - Selection strategy
+     - Most free connections
+     - Sequential rotation
+     - Weighted by response time
+   * - Adapts to load
+     - Yes (pool state)
+     - No
+     - Not guaranteed
+   * - Thundering herd risk
+     - Higher
+     - None
+     - Not guaranteed
+   * - Heterogeneous replicas
+     - Poor
+     - Poor
+     - Not guaranteed
+   * - Predictability
+     - Low
+     - High
+     - Not guaranteed
+   * - Best for
+     - Low-concurrency
+     - Uniform clusters
+     - Compatibility
+
+.. code-block:: python
+
+    from hasql.balancer_policy import (
+        GreedyBalancerPolicy,
+        RandomWeightedBalancerPolicy,
+        RoundRobinBalancerPolicy,
+    )
+    from hasql.driver.asyncpg import PoolManager
+
+    pool = PoolManager(
+        dsn,
+        balancer_policy=RandomWeightedBalancerPolicy,
+    )
+
+Metrics
+========
+
+Every ``PoolManager`` exposes a ``metrics()`` method that returns a
+point-in-time snapshot of the entire cluster state.
+
+.. code-block:: python
+
+    m = pool_manager.metrics()
+
+The returned ``Metrics`` object contains three layers:
+
+``m.pools`` — per-pool metrics
+******************************
+
+A sequence of ``PoolMetrics`` dataclasses, one per database host:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Field
+     - Description
+   * - ``host``
+     - Host address of the pool
+   * - ``role``
+     - ``"master"``, ``"replica"``, or ``None`` (unknown)
+   * - ``healthy``
+     - ``True`` if the host has a known role
+   * - ``min``
+     - Minimum connections configured
+   * - ``max``
+     - Maximum connections configured
+   * - ``idle``
+     - Connections currently idle in the pool
+   * - ``used``
+     - Connections currently checked out
+   * - ``response_time``
+     - Last health-check round-trip time (seconds)
+   * - ``in_flight``
+     - Connections acquired through the pool manager
+   * - ``extra``
+     - Driver-specific data (e.g. psycopg3's ``requests_waiting``,
+       SQLAlchemy's ``overflow``)
+
+``m.gauges`` — cluster-wide gauges
+***********************************
+
+A ``HasqlGauges`` dataclass with aggregate state:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Description
+   * - ``master_count``
+     - Number of detected masters
+   * - ``replica_count``
+     - Number of detected replicas
+   * - ``available_count``
+     - Total pools with a known role
+   * - ``stale_count``
+     - Number of pools currently classified as stale
+   * - ``unavailable_count``
+     - Number of pools currently unavailable
+   * - ``active_connections``
+     - Connections currently held by application code
+   * - ``closing``
+     - ``True`` while the pool manager is shutting down
+   * - ``closed``
+     - ``True`` after shutdown is complete
+
+``m.hasql`` — internal counters
+*******************************
+
+A ``HasqlMetrics`` dataclass with cumulative acquire/release counters
+and timing data, useful for tracking pool manager overhead.
+
+Example: simple metrics endpoint
+********************************
+
+.. code-block:: python
+
+    from dataclasses import asdict
+    import json
+
+    async def handle_metrics(request):
+        m = pool_manager.metrics()
+        return web.json_response(asdict(m))
+
+
+Exporting metrics to OTLP
+==========================
+
+hasql ships with ready-to-use examples for exporting metrics to any
+OpenTelemetry-compatible collector (Prometheus, Grafana, Datadog, etc.)
+via OTLP gRPC.
+
+Quick start
+***********
+
+Install the OpenTelemetry dependencies:
+
+.. code-block:: bash
+
+    pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc
+
+Use the helper from ``example/otlp/common.py``:
+
+.. code-block:: python
+
+    from hasql.driver.asyncpg import PoolManager
+    from example.otlp.common import (
+        register_hasql_metrics,
+        setup_meter_provider,
+    )
+
+    provider = setup_meter_provider(export_interval_ms=10_000)
+
+    pool = PoolManager(dsn, fallback_master=True)
+    await pool.ready()
+
+    # Registers observable gauges — OTel calls metrics()
+    # automatically at each export interval
+    register_hasql_metrics(pool)
+
+Exported OTel instruments
+*************************
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Gauge name
+     - Labels
+     - Source
+   * - ``db.pool.connections.min``
+     - ``host``, ``role``
+     - ``PoolMetrics.min``
+   * - ``db.pool.connections.max``
+     - ``host``, ``role``
+     - ``PoolMetrics.max``
+   * - ``db.pool.connections.idle``
+     - ``host``, ``role``
+     - ``PoolMetrics.idle``
+   * - ``db.pool.connections.used``
+     - ``host``, ``role``
+     - ``PoolMetrics.used``
+   * - ``db.pool.connections.in_flight``
+     - ``host``, ``role``
+     - ``PoolMetrics.in_flight``
+   * - ``db.pool.healthy``
+     - ``host``, ``role``
+     - ``PoolMetrics.healthy``
+   * - ``db.pool.health_check.duration``
+     - ``host``, ``role``
+     - ``PoolMetrics.response_time``
+   * - ``db.pool.masters``
+     - —
+     - ``HasqlGauges.master_count``
+   * - ``db.pool.replicas``
+     - —
+     - ``HasqlGauges.replica_count``
+   * - ``db.pool.active_connections``
+     - —
+     - ``HasqlGauges.active_connections``
+   * - ``db.pool.acquire.count``
+     - ``host``
+     - ``HasqlMetrics.acquire[host]``
+   * - ``db.pool.acquire.duration``
+     - ``host``
+     - ``HasqlMetrics.acquire_time[host]``
+   * - ``db.pool.stale.count``
+     - —
+     - ``HasqlGauges.stale_count``
+   * - ``db.pool.stale.status``
+     - ``host``, ``role``, ``staleness``
+     - ``PoolMetrics.staleness``
+   * - ``db.pool.stale.lag.bytes``
+     - ``host``, ``role``, ``staleness``
+     - ``PoolMetrics.lag[\"bytes\"]``
+   * - ``db.pool.stale.lag.time``
+     - ``host``, ``role``, ``staleness``
+     - ``PoolMetrics.lag[\"time\"]`` in seconds
+   * - ``db.pool.extra.<key>``
+     - ``host``, ``role``, optional ``staleness``
+     - ``PoolMetrics.extra[key]``
+
+Driver-specific extras
+**********************
+
+Some drivers expose additional pool internals via ``PoolMetrics.extra``.
+Use ``register_extra_gauges()`` to export them as OTel gauges:
+
+.. code-block:: python
+
+    from example.otlp.common import register_extra_gauges
+
+    # psycopg3: queue depth, error counters, etc.
+    register_extra_gauges(pool, [
+        "pool_size", "requests_waiting", "connections_errors",
+    ])
+
+    # SQLAlchemy: overflow connections
+    register_extra_gauges(pool, ["overflow"])
+
+Per-driver examples live in ``example/otlp/``.
+
+Dashboard recommendations
+*************************
+
+The exported metrics map well to Grafana / Datadog dashboard panels:
+
+**Cluster health overview**
+
+* ``db.pool.masters`` / ``db.pool.replicas`` — single-stat panels;
+  alert when master drops to 0 or replicas drop below expected count
+* ``db.pool.healthy`` by ``host`` — table or status map showing
+  per-host health; any 0 value means the host lost its role
+
+**Connection pool utilization**
+
+* ``db.pool.connections.used`` / ``db.pool.connections.max`` by
+  ``host`` — saturation ratio; alert when approaching 100%
+* ``db.pool.connections.idle`` by ``host`` — if consistently 0, the
+  pool is undersized
+* ``db.pool.connections.in_flight`` by ``host`` — connections held by
+  application code right now; spikes indicate slow queries or leaked
+  connections
+
+**Acquisition and staleness**
+
+* ``db.pool.acquire.count`` and ``db.pool.acquire.duration`` — cumulative
+  observable counters by ``host`` (duration is in seconds)
+* ``db.pool.stale.count`` — point-in-time stale pool count
+* ``db.pool.stale.status`` — per-pool status with string ``host``, ``role``,
+  and ``staleness`` attributes
+* ``db.pool.stale.lag.bytes`` and ``db.pool.stale.lag.time`` — latest byte
+  and time lag; time lag is exported in seconds
+
+**Latency and performance**
+
+* ``db.pool.health_check.duration`` by ``host`` — time series;
+  rising latency on a replica can predict upcoming failover
+* Compare ``response_time`` across hosts to spot slow replicas
+  before they affect user traffic
+
+**Pool manager overhead**
+
+* ``db.pool.active_connections`` — total connections held across all
+  pools; correlate with application request rate to right-size pools
+
+**Driver-specific panels (psycopg3)**
+
+* ``db.pool.extra.requests_waiting`` — queue depth; sustained > 0
+  means the pool is saturated
+* ``db.pool.extra.connections_errors`` — connection failures;
+  alert on rate increase
+
+**Alerting rules**
+
+* ``db.pool.masters == 0`` — **critical**: no master available
+* ``db.pool.replicas == 0`` — **warning**: all reads will fall back
+  to master (if ``fallback_master=True``) or fail
+* ``db.pool.connections.used / db.pool.connections.max > 0.9`` —
+  **warning**: pool near exhaustion
+* ``db.pool.health_check.duration > threshold`` — **warning**: host
+  becoming slow, may lose role soon
+* ``db.pool.extra.requests_waiting > 0`` for sustained period —
+  **warning**: pool undersized for current load
+
+
+Replica staleness
+=================
+
+Configure replica filtering with a ``StalenessPolicy``. Byte lag compares a
+replica replay LSN with recently collected master state; time lag reads the
+replica replay timestamp directly.
+
+.. code-block:: python
+
+    from datetime import timedelta
+
+    from hasql.driver.asyncpg import PoolManager
+    from hasql.staleness import (
+        BytesStalenessChecker,
+        StalenessPolicy,
+        TimeStalenessChecker,
+    )
+
+    by_bytes = StalenessPolicy(
+        BytesStalenessChecker(
+            max_lag_bytes=16 * 1024 * 1024,
+            max_master_lsn_age=timedelta(seconds=2),
+        ),
+        grace_period=timedelta(seconds=5),
+    )
+    by_time = StalenessPolicy(
+        TimeStalenessChecker(max_lag=timedelta(seconds=10)),
+    )
+    pool = PoolManager(dsn, staleness=by_bytes)
+
+A stale result remains eligible during ``grace_period`` only when that pool
+was observed fresh recently. With no grace period it is removed immediately.
+If master LSN state is missing or older than ``max_master_lsn_age``, the byte
+checker cannot establish lag and leaves the replica available. Checker errors
+fail closed: the pool is removed from every availability set until a later
+successful health check. With no fresh replicas, ``fallback_master=True``
+prefers a master; otherwise a known stale replica is the final fallback before
+waiting. Metrics expose lag under the ``bytes`` and ``time`` keys (the
+latter is a ``timedelta``).
+
+Architecture
+============
+
+hasql uses a composition-based architecture. Pool orchestration logic lives in
+``BasePoolManager``, while all driver-specific operations (creating pools,
+acquiring/releasing connections, checking master status) are encapsulated in
+``PoolDriver`` implementations.
+
+.. code-block::
+
+    PoolDriver (ABC)                    <- driver interface (11 methods)
+      ├── AiopgDriver
+      ├── AiopgSaDriver
+      ├── AsyncpgDriver
+      │     └── AsyncpgsaDriver
+      ├── Psycopg3Driver
+      └── AsyncSqlAlchemyDriver
+
+    BasePoolManager (concrete)          <- has-a PoolDriver
+      └── driver-specific PoolManager   <- thin wrapper: creates driver
+
+Each driver-specific ``PoolManager`` (for example,
+``hasql.driver.aiopg.PoolManager``) is a
+thin subclass that passes the appropriate ``PoolDriver`` instance to
+``BasePoolManager``:
+
+.. code-block:: python
+
+    from hasql.driver.aiopg import PoolManager
+
+    # PoolManager internally creates AiopgDriver and passes it
+    # to BasePoolManager — no need to interact with PoolDriver directly
+    pool = PoolManager("postgresql://master,replica/db")
+
+Custom drivers
+**************
+
+You can implement a custom driver by subclassing ``PoolDriver``:
+
+.. code-block:: python
+
+    from hasql.abc import PoolDriver
+    from hasql.pool_manager import BasePoolManager
+
+    class MyDriver(PoolDriver[MyPool, MyConnection]):
+        # implement all abstract methods ...
+        ...
+
+    pool = BasePoolManager(
+        "postgresql://master,replica/db",
+        driver=MyDriver(),
+    )
+
 Overview
 ========
 
-* hasql.base.BasePoolManager
-    * ``__init__(dsn, acquire_timeout, refresh_delay, refresh_timeout, fallback_master, master_as_replica_weight, balancer_policy, pool_factory_kwargs)``:
+* hasql.abc.PoolDriver
+    Abstract base class for database driver implementations.
+    Each driver must implement:
+
+    * ``get_pool_freesize(pool)`` - Return number of free connections
+    * ``acquire_from_pool(pool, *, timeout, **kwargs)`` - Acquire a
+      connection
+    * ``release_to_pool(connection, pool, **kwargs)`` - Release a
+      connection
+    * ``is_master(connection)`` - Check if connection is to master
+    * ``fetch_scalar(connection, query)`` - Execute a query and return one
+      scalar
+    * ``pool_factory(dsn, **kwargs)`` - Create a connection pool
+    * ``close_pool(pool)`` - Gracefully close a pool
+    * ``terminate_pool(pool)`` - Forcefully terminate a pool
+    * ``is_connection_closed(connection)`` - Check if connection is closed
+    * ``host(pool)`` - Return host address for a pool
+    * ``pool_stats(pool)`` - Return ``PoolStats`` for a single pool
+
+    Optional override:
+
+    * ``prepare_pool_factory_kwargs(kwargs)`` - Adjust pool factory kwargs
+      (e.g. to reserve a system connection by incrementing min/max size)
+
+* hasql.pool_manager.BasePoolManager
+    * ``__init__(dsn, *, driver, acquire_timeout, refresh_delay, refresh_timeout, fallback_master, master_as_replica_weight, balancer_policy, pool_factory_kwargs)``:
 
         * ``dsn: str`` - Connection string used by the connection.
 
-        * ``acquire_timeout: Union[int, float]`` - Default timeout (in seconds)
-          for connection operations. 1 sec by default.
+        * ``driver: PoolDriver`` - Driver instance that implements
+          database-specific pool operations. Driver-specific
+          ``PoolManager`` classes provide this automatically.
+
+        * ``acquire_timeout: Union[int, float]`` - Default timeout
+          (in seconds) for connection operations. 1 sec by default.
 
         * ``refresh_delay: Union[int, float]`` - Delay time (in seconds)
           between host polls. 1 sec by default.
 
-        * ``refresh_timeout: Union[int, float]`` - Timeout (in seconds) for
-          trying to connect and get the host role. 30 sec by default.
+        * ``refresh_timeout: Union[int, float]`` - Timeout (in seconds)
+          for trying to connect and get the host role. 30 sec by
+          default.
 
-        * ``fallback_master: bool`` - Use connections from master if replicas
-          are missing. False by default.
+        * ``fallback_master: bool`` - Use connections from master if
+          replicas are missing. False by default.
 
-        * ``master_as_replica_weight: float`` - Probability of using the master
-          as a replica (from 0. to 1.; 0. - master is not used as a replica;
-          1. - master can be used as a replica).
+        * ``master_as_replica_weight: float`` - Probability of using
+          the master as a replica (from 0. to 1.; 0. - master is not
+          used as a replica; 1. - master can be used as a replica).
 
         * ``balancer_policy: type`` - Connection pool balancing policy
-          (`hasql.balancer_policy.GreedyBalancerPolicy`,
-          `hasql.balancer_policy.RandomWeightedBalancerPolicy` or
-          `hasql.balancer_policy.RoundRobinBalancerPolicy`).
+          (``GreedyBalancerPolicy``,
+          ``RandomWeightedBalancerPolicy`` or
+          ``RoundRobinBalancerPolicy``).
 
-        * ``stopwatch_window_size: int`` - Window size for calculating the
-          median response time of each pool.
+        * ``stopwatch_window_size: int`` - Window size for calculating
+          the median response time of each pool.
 
-        * ``pool_factory_kwargs: Optional[dict]`` - Connection pool creation
-          parameters that are passed to pool factory.
+        * ``pool_factory_kwargs: Optional[dict]`` - Connection pool
+          creation parameters that are passed to pool factory.
 
-    * ``get_pool_freesize(pool)``
-      Getting the number of free connections in the connection pool. Returns
-      number of free connections in the connection pool.
-
-        * ``pool`` - Pool for which you to be getting the number of
-          free connections.
-
-    * coroutine async-with ``acquire_from_pool(pool, **kwargs)``
-      Acquire a connection from pool. Returns connection to the database.
-
-        * ``pool`` - Pool from which you to be acquiring the connection.
-
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
-
-    * coroutine ``release_to_pool(connection, pool, **kwargs)``
-      A coroutine that reverts connection conn to pool for future recycling.
-
-        * ``connection`` - Connection to be released.
-
-        * ``pool`` - Pool to which you are returning the connection.
-
-        * ``kwargs`` - Arguments to be passed to the pool release() method.
-
-    * ``is_connection_closed(connection)``
-      Returns True if connection is closed.
-
-    * ``get_last_response_time(pool)``
-      Returns database host last response time (in seconds).
+        * ``staleness: Optional[StalenessPolicy]`` - Optional replica
+          staleness policy described above.
 
     * coroutine async-with
       ``acquire(read_only, fallback_master, timeout, **kwargs)``
       Acquire a connection from free pool.
 
-        * ``readonly: bool`` - ``True`` if need return connection to replica,
-          ``False`` - to master. False by default.
+        * ``readonly: bool`` - ``True`` if need return connection to
+          replica, ``False`` - to master. False by default.
 
-        * ``fallback_master: Optional[bool]`` - Use connections from master
-          if replicas are missing. If None, then the default value is used.
+        * ``fallback_master: Optional[bool]`` - Use connections from
+          master if replicas are missing. If None, then the default
+          value is used.
 
-        * ``master_as_replica_weight: float`` - Probability of using the master
-          as a replica (from 0. to 1.; 0. - master is not used as a replica;
-          1. - master can be used as a replica).
+        * ``master_as_replica_weight: float`` - Probability of using
+          the master as a replica (from 0. to 1.).
 
-        * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
-          operations.
+        * ``timeout: Union[int, float]`` - Timeout (in seconds) for
+          connection operations.
 
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
+        * ``kwargs`` - Arguments to be passed to the pool acquire()
+          method.
 
     * coroutine async-with ``acquire_master(timeout, **kwargs)``
       Acquire a connection from free master pool.
@@ -409,58 +836,48 @@ Overview
         * ``timeout: Union[int, float]`` - Timeout (in seconds) for
           connection operations.
 
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
+        * ``kwargs`` - Arguments to be passed to the pool acquire()
+          method.
 
     * coroutine async-with
       ``acquire_replica(fallback_master, timeout, **kwargs)``
-      Acquire a connection from free master pool.
+      Acquire a connection from free replica pool.
       Equivalent ``acquire(read_only=True)``
 
-        * ``fallback_master: Optional[bool]`` - Use connections from master if
-          replicas are missing. If None, then the default value is used.
+        * ``fallback_master: Optional[bool]`` - Use connections from
+          master if replicas are missing. If None, then the default
+          value is used.
 
-        * ``master_as_replica_weight: float`` - Probability of using the master
-          as a replica (from 0. to 1.; 0. - master is not used as a replica;
-          1. - master can be used as a replica).
+        * ``master_as_replica_weight: float`` - Probability of using
+          the master as a replica (from 0. to 1.).
 
-        * ``timeout: Union[int, float]`` - Timeout (in seconds) for connection
-          operations.
+        * ``timeout: Union[int, float]`` - Timeout (in seconds) for
+          connection operations.
 
-        * ``kwargs`` - Arguments to be passed to the pool acquire() method.
-
-    * coroutine ``release(connection, **kwargs)``
-      A coroutine that reverts connection conn to pool for future recycling.
-
-        * ``connection`` - Connection to be released.
-        * ``kwargs`` - Arguments to be passed to the pool release() method.
+        * ``kwargs`` - Arguments to be passed to the pool acquire()
+          method.
 
     * coroutine ``close()``
-      Close pool. Mark all pool connections to be closed on getting back to
-      pool. Closed pool doesn’t allow to acquire new connections.
+      Close pool. Mark all pool connections to be closed on getting
+      back to pool. Closed pool doesn’t allow to acquire new
+      connections.
 
-    * coroutine ``terminate()``
-      Terminate pool. Close pool with instantly closing all acquired
-      connections also.
-
-    * coroutine ``wait_next_pool_check(timeout)``
-      Waiting for the next step to update host roles.
+    * ``metrics()``
+      Returns a ``Metrics`` snapshot of the entire cluster state.
 
     * coroutine ``ready(masters_count, replicas_count, timeout)``
-      Waiting for a connection to the database hosts. If masters_count is
-      ``None`` and replicas_count is None, then connection to all hosts
-      is expected.
+      Waiting for a connection to the database hosts. If
+      masters_count is ``None`` and replicas_count is None, then
+      connection to all hosts is expected.
 
-        * ``masters_count: Optional[int]`` - Minimum number of master hosts.
-          ``None`` by default.
+        * ``masters_count: Optional[int]`` - Minimum number of master
+          hosts. ``None`` by default.
 
-        * ``replicas_count: Optional[int]`` - Minimum number of replica hosts.
-          ``None`` by default.
+        * ``replicas_count: Optional[int]`` - Minimum number of
+          replica hosts. ``None`` by default.
 
-        * ``timeout: Union[int, float]`` - Timeout for database connections.
-          10 seconds by default.
-
-    * coroutine ``wait_all_ready()```
-      Waiting to connect to all database hosts.
+        * ``timeout: Union[int, float]`` - Timeout for database
+          connections. 10 seconds by default.
 
     * coroutine ``wait_masters_ready(masters_count)``
       Waiting for connection to the specified number of
@@ -468,49 +885,28 @@ Overview
 
         * ``masters_count: int`` - Minimum number of master hosts.
 
-    * coroutine `wait_replicas_ready(replicas_count)`
-      Waiting for connection to the specified number of
-      database replica servers.
+    * ``available_pool_count``
+      Property returning the total number of pools with a known role
+      (masters + replicas).
 
-        * ``replicas_count: int`` - Minimum number of replica hosts.
+* ``hasql.driver.aiopg.PoolManager`` (driver: ``AiopgDriver``)
 
-    * coroutine ``get_pool(read_only, fallback_master)``
-      Returns connection pool with the maximum number of free connections.
+* ``hasql.driver.aiopg_sa.PoolManager`` (driver: ``AiopgSaDriver``)
 
-        * ``readonly: bool`` - True if need return replica pool,
-          ``False`` - master pool.
+* ``hasql.driver.asyncpg.PoolManager`` (driver: ``AsyncpgDriver``)
 
-        * ``fallback_master: Optional[bool]`` - Returns master pool if
-          replicas are missing. False by default.
+* ``hasql.driver.asyncpgsa.PoolManager`` (driver: ``AsyncpgsaDriver``)
 
-    * coroutine ``get_master_pools()``
-      Returns a list of all master pools.
+* ``hasql.driver.asyncsqlalchemy.PoolManager``
+  (driver: ``AsyncSqlAlchemyDriver``)
 
-    * coroutine ``get_replica_pools(fallback_master)``
-      Returns a list of all replica pools.
+* ``hasql.driver.psycopg3.PoolManager`` (driver: ``Psycopg3Driver``)
 
-        * ``fallback_master: Optional[bool]`` - Returns a list of all master
-          pools if replicas are missing. False by default.
-
-    * ``pool_is_master(pool)``
-      Returns True if connection is master.
-
-    * ``pool_is_replica(pool)``
-      Returns True if connection is replica.
-
-    * ``register_connection(connection, pool)``
-      Match connection with the pool from which it was taken.
-      It is necessary for the release() method to work correctly.
-
-* ``hasql.aiopg.PoolManager``
-
-* ``hasql.aiopg_sa.PoolManager``
-
-* ``hasql.asyncpg.PoolManager``
-
-* ``hasql.asyncpgsa.PoolManager``
-
-* ``hasql.psycopg3.PoolManager``
+The former root driver modules remain cheap compatibility import shims.
+``hasql.psycopg3.PoolAcquireContext`` is an identity alias of
+``Psycopg3AcquireContext``. ``hasql.base`` retains only
+``BasePoolManager``, ``AbstractBalancerPolicy``, ``TimeoutAcquireContext``,
+and ``PoolAcquireContext``.
 
 Balancer policies
 =================
@@ -520,8 +916,7 @@ Balancer policies
   a random one is taken.
 
 * ``hasql.balancer_policy.RandomWeightedBalancerPolicy``
-  Chooses random pool according to their weights. The weight is inversely
-  proportional to the response time of the database of the respective pool 
-  (faster response - higher weight).
+  Retains the historical response-time weighting algorithm for compatibility;
+  its distribution and fairness characteristics are not guaranteed.
 
 * ``hasql.balancer_policy.RoundRobinBalancerPolicy``

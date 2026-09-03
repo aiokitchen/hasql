@@ -1,5 +1,8 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+from hasql.driver.psycopg3 import Psycopg3Driver
 from hasql.exceptions import (
     HasqlError,
     NoAvailablePoolError,
@@ -64,3 +67,38 @@ class TestSuiteCatchByBaseClass:
     def test_catch_pool_manager_closing_error_as_hasql_error(self):
         with pytest.raises(HasqlError):
             raise PoolManagerClosingError("closing")
+
+
+class TestSuitePsycopg3DriverIsMaster:
+    async def test_is_master_raises_on_none_row(self):
+        driver = Psycopg3Driver()
+        cursor = AsyncMock()
+        cursor.fetchone = AsyncMock(return_value=None)
+        connection = MagicMock()
+        connection.cursor = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=cursor),
+                __aexit__=AsyncMock(return_value=False),
+            ),
+        )
+        with pytest.raises(UnexpectedDatabaseResponseError):
+            await driver.is_master(connection)
+
+    async def test_unexpected_database_response_error_message_contains_show(
+        self,
+    ):
+        driver = Psycopg3Driver()
+        cursor = AsyncMock()
+        cursor.fetchone = AsyncMock(return_value=None)
+        connection = MagicMock()
+        connection.cursor = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=cursor),
+                __aexit__=AsyncMock(return_value=False),
+            ),
+        )
+        with pytest.raises(
+            UnexpectedDatabaseResponseError,
+            match="SHOW transaction_read_only",
+        ):
+            await driver.is_master(connection)

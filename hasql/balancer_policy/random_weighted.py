@@ -1,10 +1,8 @@
+import math
 import random
 from collections.abc import Iterable
 
 from .base import AbstractBalancerPolicy, PoolT
-
-
-MACHINE_EPSILON: float = 1e-16
 
 
 class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):
@@ -23,14 +21,9 @@ class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):
         if not candidates:
             return None
 
-        chosen_index = self._weighted_choice(
-            self._normalize_times(
-                self._reflect_times(
-                    self._get_response_times(candidates),
-                ),
-            ),
-        )
-        return candidates[chosen_index]
+        response_times = self._get_response_times(candidates)
+        weights = self._inverse_latency_weights(response_times)
+        return random.choices(candidates, weights=weights, k=1)[0]
 
     def _get_response_times(
         self,
@@ -40,33 +33,21 @@ class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):
             yield self._pool_state.get_last_response_time(pool)
 
     @staticmethod
-    def _reflect_times(
+    def _inverse_latency_weights(
         times: Iterable[float | None],
-    ) -> Iterable[float]:
-        list_times = [value or 0 for value in times]
-        sum_time = sum(list_times)
-        yield from map(
-            lambda value: sum_time - value + MACHINE_EPSILON,
-            list_times,
-        )
-
-    @staticmethod
-    def _normalize_times(times: Iterable[float]) -> Iterable[float]:
+    ) -> list[float]:
         list_times = list(times)
-        sum_time = sum(list_times)
-        yield from map(lambda value: sum_time / value, list_times)
+        valid_times: list[float] = []
+        for value in list_times:
+            if value is None or value <= 0 or not math.isfinite(value):
+                return [1.0] * len(list_times)
+            valid_times.append(value)
 
-    @staticmethod
-    def _weighted_choice(probability_distribution: Iterable[float]) -> int:
-        rand = random.random()
-        prefix_sum = 0.0
-        length = 0
-        for index, probability in enumerate(probability_distribution):
-            length += 1
-            prefix_sum += probability
-            if rand <= prefix_sum:
-                return index
-        return length - 1
+        if not valid_times:
+            return []
+
+        minimum_latency = min(valid_times)
+        return [minimum_latency / value for value in valid_times]
 
 
 __all__ = ["RandomWeightedBalancerPolicy"]

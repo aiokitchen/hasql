@@ -72,7 +72,6 @@ develop = [
   "twine",
   "wheel",
   "types-psycopg2",
-  "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]

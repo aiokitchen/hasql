@@ -9,6 +9,7 @@ from hasql.balancer_policy import (
     RoundRobinBalancerPolicy,
 )
 from tests.mocks import TestPoolManager
+from tests.mocks.pool_manager import TestPool
 
 balancer_policies = pytest.mark.parametrize(
     "balancer_policy",
@@ -102,3 +103,231 @@ async def test_dont_acquire_master_as_replica(
     with pytest.raises(asyncio.TimeoutError):
         async with pool_manager.acquire_replica(master_as_replica_weight=0.0):
             pass
+
+
+@balancer_policies
+async def test_master_as_replica_weight_zero_always_false(
+    make_pool_manager,
+    balancer_policy,
+):
+    """weight=0 should never choose master as replica, even when rand=0."""
+    pool_manager = await make_pool_manager(balancer_policy, replicas_count=2)
+    async with timeout(1):
+        await pool_manager._pool_state.ready()
+
+    # With weight=0, should never get master when requesting replica
+    for _ in range(20):
+        pool = await pool_manager._balancer.get_pool(
+            read_only=True,
+            master_as_replica_weight=0.0,
+        )
+        assert pool is None or pool_manager._pool_state.pool_is_replica(pool)
+
+
+@balancer_policies
+async def test_get_pool_write_with_master_as_replica_weight_raises(
+    make_pool_manager,
+    balancer_policy,
+):
+    pool_manager = await make_pool_manager(balancer_policy)
+    async with timeout(1):
+        await pool_manager._pool_state.ready()
+    with pytest.raises(ValueError, match="master_as_replica_weight"):
+        await pool_manager._balancer.get_pool(
+            read_only=False,
+            master_as_replica_weight=0.5,
+        )
+
+
+def test_random_weighted_reflect_times_inverts_response_times():
+    reflected = list(
+        RandomWeightedBalancerPolicy._reflect_times([0.1, 0.9, None]),
+    )
+
+    assert reflected == pytest.approx([0.9, 0.1, 1.0], abs=1e-15)
+
+
+def test_random_weighted_normalize_times_uses_inverse_proportions():
+    normalized = list(
+        RandomWeightedBalancerPolicy._normalize_times([1.0, 2.0, 4.0]),
+    )
+
+    assert normalized == pytest.approx([7.0, 3.5, 1.75])
+
+
+def test_random_weighted_choice_uses_cumulative_distribution(monkeypatch):
+    monkeypatch.setattr("random.random", lambda: 0.5)
+
+    chosen = RandomWeightedBalancerPolicy._weighted_choice([0.2, 0.4, 0.4])
+
+    assert chosen == 1
+
+
+def test_random_weighted_choice_falls_back_to_last_item(monkeypatch):
+    monkeypatch.setattr("random.random", lambda: 0.9)
+
+    chosen = RandomWeightedBalancerPolicy._weighted_choice([0.1, 0.2, 0.3])
+
+    assert chosen == 2
+
+
+async def test_round_robin_master_as_replica(make_pool_manager):
+    pool_manager = await make_pool_manager(
+        RoundRobinBalancerPolicy,
+        replicas_count=0,
+    )
+    async with timeout(1):
+        await pool_manager._pool_state.ready()
+
+    async with pool_manager.acquire_replica(
+        master_as_replica_weight=1.0,
+    ) as conn:
+        assert await conn.is_master()
+
+
+async def test_round_robin_waits_for_master_when_not_ready(
+    make_pool_manager,
+):
+    pool_manager = await make_pool_manager(
+        RoundRobinBalancerPolicy,
+        replicas_count=0,
+    )
+    async with timeout(2):
+        await pool_manager._pool_state.ready()
+
+    # Shut down the master so master_pool_count drops to 0
+    ps = pool_manager._pool_state
+    master_pool: TestPool = (await ps.get_master_pools())[0]
+    master_pool.shutdown()
+
+    # Wait for the health monitor to detect the shutdown
+    await ps.wait_next_pool_check()
+    assert ps.master_pool_count == 0
+
+    # Bring it back after a short delay so the wait resolves
+    async def bring_master_back():
+        await asyncio.sleep(0.15)
+        master_pool.startup()
+        master_pool.set_master(True)
+
+    asyncio.ensure_future(bring_master_back())
+
+    # Use explicit timeout to override the short default acquire_timeout
+    async with timeout(2):
+        async with pool_manager.acquire_master(timeout=2) as conn:
+            assert await conn.is_master()
+
+
+async def test_round_robin_waits_for_replica_when_not_ready(
+    make_pool_manager,
+):
+    pool_manager = await make_pool_manager(
+        RoundRobinBalancerPolicy,
+        replicas_count=2,
+    )
+    async with timeout(2):
+        await pool_manager._pool_state.ready()
+
+    # Shut down all replicas so replica_pool_count drops to 0
+    ps = pool_manager._pool_state
+    replica_pools = [
+        pool
+        for pool in ps.pools
+        if pool is not None and ps.pool_is_replica(pool)
+    ]
+    for rp in replica_pools:
+        rp.shutdown()
+
+    # Wait for health monitor to detect shutdowns
+    await pool_manager._pool_state.wait_next_pool_check()
+    assert pool_manager._pool_state.replica_pool_count == 0
+
+    # Bring replicas back after a short delay
+    async def bring_replicas_back():
+        await asyncio.sleep(0.15)
+        for rp in replica_pools:
+            rp.startup()
+
+    asyncio.ensure_future(bring_replicas_back())
+
+    # Use explicit timeout to override the short default acquire_timeout
+    async with timeout(2):
+        async with pool_manager.acquire_replica(timeout=2) as conn:
+            assert not await conn.is_master()
+
+
+async def test_round_robin_fallback_master_waits_when_master_not_ready(
+    make_pool_manager,
+):
+    pool_manager = await make_pool_manager(
+        RoundRobinBalancerPolicy,
+        replicas_count=0,
+    )
+    async with timeout(2):
+        await pool_manager._pool_state.ready()
+
+    # Shut down the master so both master and replica counts are 0
+    ps = pool_manager._pool_state
+    master_pool: TestPool = (await ps.get_master_pools())[0]
+    master_pool.shutdown()
+
+    await pool_manager._pool_state.wait_next_pool_check()
+    assert pool_manager._pool_state.master_pool_count == 0
+    assert pool_manager._pool_state.replica_pool_count == 0
+
+    # Bring master back after a short delay
+    async def bring_master_back():
+        await asyncio.sleep(0.15)
+        master_pool.startup()
+        master_pool.set_master(True)
+
+    asyncio.ensure_future(bring_master_back())
+
+    # acquire_replica with fallback_master=True should wait for master
+    # Use explicit timeout to override the short default acquire_timeout
+    async with timeout(2):
+        async with pool_manager.acquire_replica(
+            fallback_master=True,
+            timeout=2,
+        ) as conn:
+            assert await conn.is_master()
+
+
+async def test_round_robin_master_with_fallback_and_no_replicas(
+    make_pool_manager,
+):
+    pool_manager = await make_pool_manager(
+        RoundRobinBalancerPolicy,
+        replicas_count=0,
+    )
+    async with timeout(1):
+        await pool_manager._pool_state.ready()
+
+    assert pool_manager._pool_state.replica_pool_count == 0
+
+    # Acquiring master should work even when fallback_master
+    # is set and there are no replicas
+    async with timeout(1):
+        async with pool_manager.acquire_master() as conn:
+            assert await conn.is_master()
+
+
+@balancer_policies
+async def test_read_only_selects_weighted_master_without_replicas(
+    make_pool_manager,
+    balancer_policy,
+):
+    pool_manager = await make_pool_manager(balancer_policy, replicas_count=0)
+    async with timeout(1):
+        await pool_manager.ready()
+
+    pool = await asyncio.wait_for(
+        pool_manager._balancer.get_pool(
+            read_only=True,
+            fallback_master=False,
+            master_as_replica_weight=1.0,
+        ),
+        timeout=0.2,
+    )
+
+    assert pool_manager._pool_state.pool_is_master(pool)

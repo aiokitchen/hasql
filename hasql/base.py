@@ -16,7 +16,13 @@ from typing import (
     Union,
 )
 
-from .metrics import CalculateMetrics, DriverMetrics, Metrics
+from .metrics import (
+    CalculateMetrics,
+    DriverMetrics,
+    HasqlGauges,
+    Metrics,
+    PoolMetrics,
+)
 from .utils import Dsn, Stopwatch, split_dsn
 
 logger = logging.getLogger(__name__)
@@ -214,7 +220,9 @@ class BasePoolManager(ABC):
         self._master_cond = asyncio.Condition()
         self._replica_cond = asyncio.Condition()
         self._unmanaged_connections = {}
-        self._stopwatch = Stopwatch(window_size=stopwatch_window_size)
+        self._stopwatch: Stopwatch[Any] = Stopwatch(
+            window_size=stopwatch_window_size,
+        )
         self._refresh_role_tasks = [
             asyncio.create_task(self._check_pool_task(index))
             for index in range(len(self._dsn))
@@ -252,7 +260,7 @@ class BasePoolManager(ABC):
         return self.master_pool_count + self.replica_pool_count
 
     @property
-    def balancer(self) -> AbstractBalancerPolicy:
+    def balancer(self) -> Any:
         return self._balancer
 
     @property
@@ -308,9 +316,31 @@ class BasePoolManager(ABC):
         pass
 
     def metrics(self) -> Metrics:
+        driver_metrics = self._driver_metrics()
         return Metrics(
-            drivers=self._driver_metrics(),
+            pools=[
+                PoolMetrics(
+                    host=driver.host,
+                    role=None,
+                    healthy=True,
+                    min=driver.min,
+                    max=driver.max,
+                    idle=driver.idle,
+                    used=driver.used,
+                    response_time=None,
+                    in_flight=0,
+                )
+                for driver in driver_metrics
+            ],
             hasql=self._metrics.metrics(),
+            gauges=HasqlGauges(
+                master_count=self.master_pool_count,
+                replica_count=self.replica_pool_count,
+                available_count=self.available_pool_count,
+                active_connections=len(self._unmanaged_connections),
+                closing=self._closing,
+                closed=self._closed,
+            ),
         )
 
     def _prepare_acquire_kwargs(

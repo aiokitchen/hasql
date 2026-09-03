@@ -54,6 +54,8 @@ class PoolManager(BasePoolManager):
         d = str(dsn)
         if d.startswith('postgresql://'):
             d = d.replace('postgresql://', 'postgresql+asyncpg://', 1)
+        elif d.startswith('postgres://'):
+            d = d.replace('postgres://', 'postgresql+asyncpg://', 1)
         return create_async_engine(d, **self.pool_factory_kwargs)
 
     def _prepare_pool_factory_kwargs(self, kwargs: dict) -> dict:

@@ -3,10 +3,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hasql.base import PoolAcquireContext
+from hasql.acquire import PoolAcquireContext
+from hasql.health import PoolHealthMonitor
 from hasql.metrics import CalculateMetrics
+from hasql.utils import Dsn
 from tests.mocks import TestPoolManager
-from tests.mocks.pool_manager import TestPool
+from tests.mocks.pool_manager import TestDriver, TestPool
 
 
 class DelayedBalancer:
@@ -43,22 +45,13 @@ class _TimeoutSlowAcquire:
         ).__await__()
 
 
-class RecordingPoolManager:
-    def __init__(self, pool_delay: float, acquire_delay: float):
-        self.pool = object()
-        self.balancer = DelayedBalancer(self.pool, delay=pool_delay)
-        self.acquire_delay = acquire_delay
-        self.acquire_kwargs = None
+class _PoolStateProxy:
+    def __init__(self, parent):
+        self._parent = parent
 
-    def _prepare_acquire_kwargs(self, kwargs: dict, timeout):
-        prepared_kwargs = dict(kwargs)
-        prepared_kwargs["timeout"] = timeout
-        return prepared_kwargs
-
-    def acquire_from_pool(self, pool, **kwargs):
-        self.acquire_kwargs = kwargs
-        timeout = kwargs.get("timeout")
-        slow = SlowAcquire(self.acquire_delay)
+    def acquire_from_pool(self, pool, *, timeout=None, **kwargs):
+        self._parent.acquire_timeout = timeout
+        slow = SlowAcquire(self._parent.acquire_delay)
         if timeout is not None:
             return _TimeoutSlowAcquire(slow, timeout)
         return slow
@@ -66,22 +59,47 @@ class RecordingPoolManager:
     def host(self, pool):
         return "test-host:5432"
 
-    def register_connection(self, connection, pool):
+
+class RecordingPoolManager:
+    def __init__(self, pool_delay: float, acquire_delay: float):
+        self.pool = object()
+        self._balancer = DelayedBalancer(self.pool, delay=pool_delay)
+        self.acquire_delay = acquire_delay
+        self.acquire_timeout = None
+        self._pool_state = _PoolStateProxy(self)
+
+    def _register_connection(self, connection, pool):
         pass
 
 
-class OneConnectionPoolManager(TestPoolManager):
-    async def _pool_factory(self, dsn):
+class OneConnectionTestDriver(TestDriver):
+    async def pool_factory(self, dsn, **kwargs):
         return TestPool(str(dsn), maxsize=1)
 
 
-class ReacquiringOneConnectionPoolManager(OneConnectionPoolManager):
-    async def _periodic_pool_check(self, pool, dsn, sys_connection):
-        await asyncio.wait_for(
-            self._refresh_pool_role(pool, dsn, sys_connection),
-            timeout=self._refresh_timeout,
-        )
-        await self._notify_about_pool_has_checked(dsn)
+class OneConnectionPoolManager(TestPoolManager):
+    def __init__(self, dsn, **kwargs):
+        super().__init__(dsn, **kwargs)
+        self._pool_state._driver = OneConnectionTestDriver()
+
+
+class TimeoutPoolState:
+    def __init__(self):
+        self.dsn = [Dsn.parse("postgresql://test:test@master:5432/test")]
+        self.removed = False
+        self.checked = False
+
+    async def refresh_pool_role(self, pool, dsn, connection):
+        await asyncio.Event().wait()
+
+    def pool_is_stale(self, pool):
+        return False
+
+    def remove_pool_from_all_sets(self, pool, dsn):
+        self.removed = True
+
+    async def notify_pool_checked(self, dsn):
+        self.checked = True
 
 
 async def wait_until(predicate, timeout: float = 1.0):
@@ -93,9 +111,12 @@ async def wait_until(predicate, timeout: float = 1.0):
 
 
 async def test_acquire_timeout_uses_shared_budget():
-    pool_manager = RecordingPoolManager(pool_delay=0.05, acquire_delay=1.0)
+    recording = RecordingPoolManager(pool_delay=0.05, acquire_delay=1.0)
     context = PoolAcquireContext(
-        pool_manager=pool_manager,
+        pool_state=recording._pool_state,
+        balancer=recording._balancer,
+        register_connection=recording._register_connection,
+        unregister_connection=lambda conn: None,
         read_only=False,
         fallback_master=False,
         master_as_replica_weight=None,
@@ -109,27 +130,28 @@ async def test_acquire_timeout_uses_shared_budget():
 
     elapsed = asyncio.get_running_loop().time() - start
     assert elapsed < 0.2
-    assert pool_manager.acquire_kwargs is not None
-    assert 0 < pool_manager.acquire_kwargs["timeout"] < 0.1
+    assert recording.acquire_timeout is not None
+    assert 0 < recording.acquire_timeout < 0.1
 
 
 async def test_refresh_timeout_removes_pool_from_available_set():
-    pool_manager = ReacquiringOneConnectionPoolManager(
-        "postgresql://test:test@master:5432/test",
-        refresh_timeout=0.2,
-        refresh_delay=0.2,
-        acquire_timeout=0.5,
+    pool_state = TimeoutPoolState()
+    monitor = PoolHealthMonitor(
+        pool_state,
+        refresh_delay=0,
+        refresh_timeout=0.02,
+        closing_getter=lambda: pool_state.checked,
     )
-    try:
-        await pool_manager.ready()
-        connection = await pool_manager.acquire_master()
+    await monitor.stop()
 
-        await wait_until(lambda: pool_manager.master_pool_count == 0)
+    await asyncio.wait_for(
+        monitor._periodic_pool_check(
+            object(), pool_state.dsn[0], object(),
+        ),
+        timeout=0.2,
+    )
 
-        await pool_manager.release(connection)
-        await wait_until(lambda: pool_manager.master_pool_count == 1)
-    finally:
-        await pool_manager.close()
+    assert pool_state.removed
 
 
 async def test_close_preserves_cancellation_during_sys_connection_release():
@@ -139,17 +161,17 @@ async def test_close_preserves_cancellation_during_sys_connection_release():
         refresh_delay=0.05,
     )
     try:
-        await pool_manager.ready()
-        refresh_tasks = list(pool_manager._refresh_role_tasks)
-        pool_manager.release_to_pool = AsyncMock(
+        await pool_manager._pool_state.ready()
+        refresh_tasks = list(pool_manager._health.tasks)
+        pool_manager._pool_state.release_to_pool = AsyncMock(
             side_effect=asyncio.CancelledError(),
         )
 
         await pool_manager.close()
 
-        assert pool_manager.closed
-        assert pool_manager.release_to_pool.await_count > 0
+        assert pool_manager._closed
+        assert pool_manager._pool_state.release_to_pool.await_count > 0
         assert all(task.done() for task in refresh_tasks)
     finally:
-        if not pool_manager.closed:
+        if not pool_manager._closed:
             await pool_manager.close()

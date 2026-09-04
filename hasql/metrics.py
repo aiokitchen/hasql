@@ -1,4 +1,5 @@
 import time
+import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -120,8 +121,24 @@ class HasqlGauges:
 
 @dataclass(frozen=True)
 class Metrics:
-    drivers: Sequence[DriverMetrics]
+    pools: Sequence[PoolMetrics]
     hasql: HasqlMetrics
+    gauges: HasqlGauges
+
+    @property
+    def drivers(self) -> Sequence[DriverMetrics]:
+        """Backward-compatible accessor. Deprecated."""
+        warnings.warn(
+            "Metrics.drivers is deprecated, use Metrics.pools instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return [
+            DriverMetrics(
+                min=p.min, max=p.max, idle=p.idle, used=p.used, host=p.host,
+            )
+            for p in self.pools
+        ]
 
 
 __all__ = (

@@ -1,23 +1,29 @@
-from typing import Optional, Type
-
 import mock
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
-from hasql.asyncsqlalchemy import PoolManager, async_sessionmaker
-from hasql.metrics import DriverMetrics
+from hasql.driver.asyncsqlalchemy import PoolManager, async_sessionmaker
 
 
-def test_prepare_acquire_kwargs_sets_timeout():
-    pool_manager = PoolManager.__new__(PoolManager)
-    assert pool_manager._prepare_acquire_kwargs(
-        {"some_kwarg": 1},
-        timeout=0.25,
-    ) == {
-        "some_kwarg": 1,
-        "_timeout": 0.25,
-    }
+def test_acquire_from_pool_wraps_with_timeout():
+    from hasql.acquire import TimeoutAcquireContext
+    from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
+
+    driver = AsyncSqlAlchemyDriver()
+    pool = mock.MagicMock()
+    ctx = driver.acquire_from_pool(pool, timeout=0.25)
+    assert isinstance(ctx, TimeoutAcquireContext)
+
+
+def test_acquire_from_pool_no_timeout():
+    from hasql.acquire import TimeoutAcquireContext
+    from hasql.driver.asyncsqlalchemy import AsyncSqlAlchemyDriver
+
+    driver = AsyncSqlAlchemyDriver()
+    pool = mock.MagicMock()
+    ctx = driver.acquire_from_pool(pool)
+    assert not isinstance(ctx, TimeoutAcquireContext)
 
 
 @pytest.fixture
@@ -28,7 +34,7 @@ async def pool_manager(pg_dsn):
         pool_factory_kwargs={"pool_size": 10},
     )
     try:
-        await pg_pool.ready()
+        await pg_pool._pool_state.ready()
         yield pg_pool
     finally:
         await pg_pool.close()
@@ -47,7 +53,7 @@ async def test_acquire_without_context(pool_manager):
 
 
 async def test_close(pool_manager):
-    sqlalchemy_pool: AsyncEngine = await pool_manager.balancer.get_pool(
+    sqlalchemy_pool: AsyncEngine = await pool_manager._balancer.get_pool(
         read_only=False,
     )
     assert sqlalchemy_pool.sync_engine.pool.checkedout() > 0
@@ -55,36 +61,33 @@ async def test_close(pool_manager):
     assert sqlalchemy_pool.sync_engine.pool.checkedout() == 0
 
 
-async def test_terminate(pool_manager):
-    sqlalchemy_pool: AsyncEngine = await pool_manager.balancer.get_pool(
-        read_only=False,
-    )
-    assert sqlalchemy_pool.sync_engine.pool.overflow() == -10
-    await pool_manager.terminate()
-    assert sqlalchemy_pool.sync_engine.pool.overflow() == -11
-
-
 async def test_release(pool_manager):
-    sqlalchemy_pool = await pool_manager.balancer.get_pool(read_only=False)
-    assert pool_manager.get_pool_freesize(sqlalchemy_pool) == 10
-    conn = await pool_manager.acquire_master()
-    assert pool_manager.get_pool_freesize(sqlalchemy_pool) == 9
-    await pool_manager.release(conn)
-    assert pool_manager.get_pool_freesize(sqlalchemy_pool) == 10
+    sqlalchemy_pool = await pool_manager._balancer.get_pool(read_only=False)
+    assert pool_manager._pool_state.get_pool_freesize(sqlalchemy_pool) == 10
+    async with pool_manager.acquire_master() as _conn:
+        assert pool_manager._pool_state.get_pool_freesize(sqlalchemy_pool) == 9
+    assert pool_manager._pool_state.get_pool_freesize(sqlalchemy_pool) == 10
 
 
 async def test_is_connection_closed(pool_manager):
     async with pool_manager.acquire_master() as conn:
-        assert not pool_manager.is_connection_closed(conn)
+        assert not pool_manager._pool_state.is_connection_closed(conn)
         await conn.close()
-        assert pool_manager.is_connection_closed(conn)
+        assert pool_manager._pool_state.is_connection_closed(conn)
 
 
 async def test_metrics(pool_manager):
     async with pool_manager.acquire_master():
-        assert pool_manager.metrics().drivers == [
-            DriverMetrics(max=11, min=0, idle=0, used=2, host=mock.ANY)
-        ]
+        pools = pool_manager.metrics().pools
+        assert len(pools) == 1
+        p = pools[0]
+        assert p.max == 11
+        assert p.min == 0
+        assert p.used == 2
+        assert p.role == "master"
+        assert p.healthy is True
+        assert p.in_flight == 1
+        assert "overflow" in p.extra
 
 
 @pytest.mark.parametrize("expire_on_commit", [True, False, None])
@@ -93,10 +96,10 @@ async def test_metrics(pool_manager):
 @pytest.mark.parametrize("class_", [AsyncSession, None])
 async def test_async_sessionmaker(
     pool_manager: PoolManager,
-    expire_on_commit: Optional[bool],
-    autoflush: Optional[bool],
-    read_only: Optional[bool],
-    class_: Optional[Type[AsyncSession]],
+    expire_on_commit: bool | None,
+    autoflush: bool | None,
+    read_only: bool | None,
+    class_: type[AsyncSession] | None,
 ):
     acquire_kwargs = {}
 

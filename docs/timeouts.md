@@ -35,12 +35,12 @@ using the most appropriate mechanism:
 
 ### asyncpg
 
-`_prepare_acquire_kwargs` sets `timeout=<remaining>`, which is passed to
+`AsyncpgDriver.acquire_from_pool(timeout=<remaining>)` passes the budget to
 `pool.acquire(timeout=...)`. asyncpg raises `asyncio.TimeoutError` natively.
 
 ### psycopg3
 
-`_prepare_acquire_kwargs` sets `timeout=<remaining>`, which is passed to
+`Psycopg3Driver.acquire_from_pool(timeout=<remaining>)` passes the budget to
 `pool.getconn(timeout=...)`. psycopg3 raises `psycopg_pool.PoolTimeout`
 natively.
 
@@ -70,8 +70,12 @@ These are separate from the acquire timeout:
 | `refresh_timeout` | 30 s    | Timeout for a single health-check iteration   |
 
 Health checks acquire a system connection and run
-`SHOW transaction_read_only`. If a check exceeds `refresh_timeout`,
-the pool is removed from the available set until the next successful check.
+`SHOW transaction_read_only`, followed by configured staleness collection or
+checking. If the role check exceeds `refresh_timeout`, the existing timeout
+path removes the pool from availability until a later successful check. Any
+exception from staleness collection/checking also fails closed: the pool is
+removed from master, replica, and stale sets and its cached lag/grace tracking
+is cleared.
 
 ## Timeout flow diagram
 
@@ -83,8 +87,8 @@ acquire(timeout=T)
   +-- _get_pool(deadline)                   [pool selection, uses remaining budget]
   |     waits up to (deadline - now)
   |
-  +-- _acquire_kwargs(deadline)             [computes remaining = deadline - now]
+  +-- remaining = deadline - now
   |
-  +-- driver.acquire_from_pool(timeout=remaining)
-        each driver enforces timeout using its own mechanism
+  +-- pool_state.acquire_from_pool(timeout=remaining)
+        delegates to the driver, which enforces its native timeout
 ```

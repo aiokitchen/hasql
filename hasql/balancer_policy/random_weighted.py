@@ -1,75 +1,71 @@
 import random
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
-from hasql.balancer_policy.base import BaseBalancerPolicy
+from .base import AbstractBalancerPolicy, PoolT
 
 
 MACHINE_EPSILON: float = 1e-16
 
 
-class RandomWeightedBalancerPolicy(BaseBalancerPolicy):
+class RandomWeightedBalancerPolicy(AbstractBalancerPolicy[PoolT]):
     async def _get_pool(
         self,
         read_only: bool,
         fallback_master: bool = False,
         choose_master_as_replica: bool = False,
-    ):
-        candidates = []
+    ) -> PoolT | None:
+        candidates = await self._get_candidates(
+            read_only=read_only,
+            fallback_master=fallback_master,
+            choose_master_as_replica=choose_master_as_replica,
+        )
 
-        if read_only:
-            candidates.extend(
-                await self._pool_manager.get_replica_pools(
-                    fallback_master=fallback_master,
-                ),
-            )
-        if (
-                not read_only or
-                (
-                    choose_master_as_replica and
-                    self._pool_manager.master_pool_count > 0
-                )
-        ):
-            candidates.extend(await self._pool_manager.get_master_pools())
+        if not candidates:
+            return None
 
-        choiced_index = self._weighted_choice(
+        chosen_index = self._weighted_choice(
             self._normalize_times(
                 self._reflect_times(
                     self._get_response_times(candidates),
                 ),
             ),
         )
+        return candidates[chosen_index]
 
-        return candidates[choiced_index]
-
-    def _get_response_times(self, pools: list) -> Iterable[Optional[float]]:
+    def _get_response_times(
+        self,
+        pools: list[PoolT],
+    ) -> Iterable[float | None]:
         for pool in pools:
-            yield self._pool_manager.get_last_response_time(pool)
+            yield self._pool_state.get_last_response_time(pool)
 
     @staticmethod
     def _reflect_times(
-        times: Iterable[Optional[float]],
+        times: Iterable[float | None],
     ) -> Iterable[float]:
         list_times = [value or 0 for value in times]
         sum_time = sum(list_times)
-        yield from map(lambda x: sum_time - x + MACHINE_EPSILON, list_times)
+        yield from map(
+            lambda value: sum_time - value + MACHINE_EPSILON,
+            list_times,
+        )
 
     @staticmethod
     def _normalize_times(times: Iterable[float]) -> Iterable[float]:
         list_times = list(times)
         sum_time = sum(list_times)
-        yield from map(lambda x: sum_time / x, list_times)
+        yield from map(lambda value: sum_time / value, list_times)
 
     @staticmethod
     def _weighted_choice(probability_distribution: Iterable[float]) -> int:
         rand = random.random()
-        prefix_sum: float = 0.0
-
+        prefix_sum = 0.0
         length = 0
-        for i, p in enumerate(probability_distribution):
+        for index, probability in enumerate(probability_distribution):
             length += 1
-            prefix_sum += p
+            prefix_sum += probability
             if rand <= prefix_sum:
-                return i
+                return index
         return length - 1
 
 

@@ -33,7 +33,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
   "Programming Language :: Python",
 ]
-dependencies = ["packaging"]
+dependencies = []
 
 [dependency-groups]
 aiopg = ["aiopg"]
@@ -151,6 +151,7 @@ filterwarnings = [
 ]
 python_classes = "TestSuite*"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 check_untyped_defs = false

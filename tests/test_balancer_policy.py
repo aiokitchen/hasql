@@ -1,4 +1,6 @@
 import asyncio
+import math
+import random
 
 import pytest
 from async_timeout import timeout
@@ -8,8 +10,10 @@ from hasql.balancer_policy import (
     RandomWeightedBalancerPolicy,
     RoundRobinBalancerPolicy,
 )
+from hasql.pool_state import PoolState
+from hasql.utils import Dsn
 from tests.mocks import TestPoolManager
-from tests.mocks.pool_manager import TestPool
+from tests.mocks.pool_manager import TestDriver, TestPool
 
 balancer_policies = pytest.mark.parametrize(
     "balancer_policy",
@@ -19,6 +23,46 @@ balancer_policies = pytest.mark.parametrize(
         RoundRobinBalancerPolicy,
     ],
 )
+
+
+class StablePoolStateProvider:
+    def __init__(
+        self,
+        pools: list[object],
+        response_times: list[float | None],
+    ) -> None:
+        self._pools = pools
+        self._response_times = dict(zip(pools, response_times, strict=True))
+
+    @property
+    def master_pool_count(self) -> int:
+        return 0
+
+    @property
+    def replica_pool_count(self) -> int:
+        return len(self._pools)
+
+    @property
+    def stale_pool_count(self) -> int:
+        return 0
+
+    async def get_master_pools(self) -> list[object]:
+        return []
+
+    async def get_replica_pools(
+        self,
+        fallback_master: bool = False,
+    ) -> list[object]:
+        return list(self._pools)
+
+    def get_stale_pools(self) -> list[object]:
+        return []
+
+    def get_pool_freesize(self, pool: object) -> int:
+        return 1
+
+    def get_last_response_time(self, pool: object) -> float | None:
+        return self._response_times[pool]
 
 
 @pytest.fixture
@@ -139,36 +183,143 @@ async def test_get_pool_write_with_master_as_replica_weight_raises(
         )
 
 
-def test_random_weighted_reflect_times_inverts_response_times():
-    reflected = list(
-        RandomWeightedBalancerPolicy._reflect_times([0.1, 0.9, None]),
+def test_random_weighted_inverse_latency_weights_use_inverse_ratios():
+    weights = RandomWeightedBalancerPolicy._inverse_latency_weights(
+        [1.0, 2.0, 4.0],
     )
 
-    assert reflected == pytest.approx([0.9, 0.1, 1.0], abs=1e-15)
+    assert weights == pytest.approx([1.0, 0.5, 0.25])
 
 
-def test_random_weighted_normalize_times_uses_inverse_proportions():
-    normalized = list(
-        RandomWeightedBalancerPolicy._normalize_times([1.0, 2.0, 4.0]),
+def test_random_weighted_inverse_latency_weights_are_equal_for_equal_times():
+    weights = RandomWeightedBalancerPolicy._inverse_latency_weights(
+        [0.25, 0.25, 0.25],
     )
 
-    assert normalized == pytest.approx([7.0, 3.5, 1.75])
+    assert weights == [1.0, 1.0, 1.0]
 
 
-def test_random_weighted_choice_uses_cumulative_distribution(monkeypatch):
-    monkeypatch.setattr("random.random", lambda: 0.5)
+@pytest.mark.parametrize(
+    "invalid_time",
+    [None, 0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+)
+def test_random_weighted_invalid_latency_makes_all_weights_equal(
+    invalid_time,
+):
+    weights = RandomWeightedBalancerPolicy._inverse_latency_weights(
+        [0.5, invalid_time, 2.0],
+    )
 
-    chosen = RandomWeightedBalancerPolicy._weighted_choice([0.2, 0.4, 0.4])
-
-    assert chosen == 1
+    assert weights == [1.0, 1.0, 1.0]
 
 
-def test_random_weighted_choice_falls_back_to_last_item(monkeypatch):
-    monkeypatch.setattr("random.random", lambda: 0.9)
+def test_random_weighted_inverse_latency_weights_are_not_capped():
+    weights = RandomWeightedBalancerPolicy._inverse_latency_weights(
+        [0.001, 1000.0],
+    )
 
-    chosen = RandomWeightedBalancerPolicy._weighted_choice([0.1, 0.2, 0.3])
+    assert (weights, weights[0] / weights[1]) == (
+        pytest.approx([1.0, 1e-6]),
+        pytest.approx(1e6),
+    )
 
-    assert chosen == 2
+
+async def test_random_weighted_smallest_positive_latency_uses_finite_weights(
+    monkeypatch,
+):
+    smallest_positive = math.nextafter(0.0, 1.0)
+    pools = [object(), object()]
+    choices_calls = []
+    original_choices = random.choices
+
+    def choose(candidates, weights, k):
+        candidate_list = list(candidates)
+        weight_list = list(weights)
+        choices_calls.append((candidate_list, weight_list, k))
+        return original_choices(candidate_list, weights=weight_list, k=k)
+
+    monkeypatch.setattr("random.choices", choose)
+    policy = RandomWeightedBalancerPolicy(
+        StablePoolStateProvider(pools, [smallest_positive, 1.0]),
+    )
+
+    chosen_pool = await policy._get_pool(read_only=True)
+
+    received_weights = choices_calls[0][1]
+    assert (
+        chosen_pool in pools,
+        choices_calls[0][0],
+        choices_calls[0][2],
+        all(math.isfinite(weight) for weight in received_weights),
+        all(weight > 0.0 for weight in received_weights),
+    ) == (True, pools, 1, True, True)
+
+
+async def test_random_weighted_get_pool_passes_candidates_and_weights(
+    monkeypatch,
+):
+    slow_pool = object()
+    fast_pool = object()
+    pools = [slow_pool, fast_pool]
+    choices_calls = []
+
+    def choose(candidates, weights, k):
+        candidate_list = list(candidates)
+        choices_calls.append((candidate_list, list(weights), k))
+        return [candidate_list[1]]
+
+    monkeypatch.setattr("random.choices", choose)
+    pool_state = StablePoolStateProvider(pools, [2.0, 0.5])
+    policy = RandomWeightedBalancerPolicy(pool_state)
+
+    chosen_pool = await policy._get_pool(read_only=True)
+
+    assert (chosen_pool, choices_calls) == (
+        fast_pool,
+        [([slow_pool, fast_pool], [0.25, 1.0], 1)],
+    )
+
+
+async def test_random_weighted_get_pool_returns_none_without_candidates():
+    policy = RandomWeightedBalancerPolicy(StablePoolStateProvider([], []))
+
+    chosen_pool = await policy._get_pool(read_only=True)
+
+    assert chosen_pool is None
+
+
+async def test_random_weighted_get_pool_returns_the_only_candidate():
+    only_pool = object()
+    pool_state = StablePoolStateProvider([only_pool], [0.5])
+    policy = RandomWeightedBalancerPolicy(pool_state)
+
+    chosen_pool = await policy._get_pool(read_only=True)
+
+    assert chosen_pool is only_pool
+
+
+async def test_read_only_waiter_wakes_when_pool_becomes_stale():
+    dsn = Dsn.parse("postgresql://test:test@replica:5432/test")
+    pool = TestPool(str(dsn))
+    pool_state = PoolState([dsn], TestDriver(), 10)
+    pool_state.set_pool(0, pool)
+    balancer = RoundRobinBalancerPolicy(pool_state)
+    selection = asyncio.create_task(
+        balancer.get_pool(read_only=True, fallback_master=True),
+    )
+
+    try:
+        await asyncio.wait_for(asyncio.sleep(0), timeout=0.1)
+        pool_state.mark_pool_stale(pool)
+        selected = await asyncio.wait_for(
+            asyncio.shield(selection), timeout=0.1,
+        )
+    finally:
+        if not selection.done():
+            selection.cancel()
+        await asyncio.gather(selection, return_exceptions=True)
+
+    assert selected is pool
 
 
 async def test_round_robin_master_as_replica(make_pool_manager):

@@ -4,6 +4,8 @@ from importlib import import_module
 
 import pytest
 
+from hasql.metrics import HasqlGauges, PoolMetrics, PoolRole
+
 
 @pytest.mark.parametrize(
     "driver_name",
@@ -24,6 +26,35 @@ def test_legacy_driver_module_reexports_pool_manager(driver_name):
     canonical = import_module(f"hasql.driver.{driver_name}")
 
     assert legacy.PoolManager is canonical.PoolManager
+
+
+def test_pool_metrics_tenth_positional_argument_remains_extra():
+    extra = {"driver": "value"}
+
+    metrics = PoolMetrics(
+        "localhost",
+        PoolRole.REPLICA,
+        True,
+        1,
+        10,
+        5,
+        4,
+        0.01,
+        1,
+        extra,
+    )
+
+    assert (metrics.extra, metrics.staleness, metrics.lag) == (
+        extra,
+        None,
+        {},
+    )
+
+
+def test_hasql_gauges_seventh_positional_argument_remains_unavailable_count():
+    gauges = HasqlGauges(1, 2, 3, 4, False, False, 5)
+
+    assert (gauges.unavailable_count, gauges.stale_count) == (5, 0)
 
 
 def test_asyncsqlalchemy_reexports_sessionmaker():

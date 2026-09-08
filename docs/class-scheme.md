@@ -225,7 +225,7 @@ No additional methods or overrides — purely a convenience binding.
 pool_state.py ──imports──► utils.py, abc.py, acquire.py, metrics.py
 balancer_policy/base.py ──imports──► pool_state.py (PoolStateProvider only)
 pool_manager.py ──imports──► pool_state.py, balancer_policy/, health.py, metrics.py, abc.py, acquire.py
-health.py ──TYPE_CHECKING import──► pool_manager.py (BasePoolManager)
+health.py ──imports──► pool_state.py (PoolState)
 acquire.py ──TYPE_CHECKING import──► balancer_policy/base.py, pool_state.py
 ```
 

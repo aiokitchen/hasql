@@ -4,24 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-Install the development dependency group with `uv`:
+Use both dependency groups: `develop` supplies tools and `test` includes all
+adapter and OTLP regression dependencies. Pass the groups to `uv run` too.
 
 ```bash
-uv sync --group develop
+uv sync --group develop --group test
 
 # Run all tests, or a selected file/pattern
-uv run pytest tests
-uv run pytest tests/test_utils.py -k "connection_string"
+uv run --group develop --group test pytest tests
+uv run --group develop --group test pytest tests/test_utils.py -k "connection_string"
 
 # Run static checks
-uv run ruff check hasql tests
-uv run mypy --install-types --non-interactive hasql tests
+uv run --group develop --group test ruff check hasql tests
+uv run --group develop --group test mypy --install-types --non-interactive hasql tests
 
 # Run tox environments
-uv run tox -e lint
-uv run tox -e mypy
-uv run tox -e py310       # Also available: py311, py312, py313, py314
-uv run tox -e py310-uvloop  # Also available for py311–py314
+uv run --group develop --group test tox -e lint
+uv run --group develop --group test tox -e mypy
+uv run --group develop --group test tox -e py310  # Also py311–py314
+uv run --group develop --group test tox -e py310-uvloop  # Also py311–py314
 ```
 
 The `justfile` contains only `chaos-*` recipes for the optional test cluster;
@@ -142,7 +143,7 @@ All balancer policies live in `hasql/balancer_policy/`. The module structure:
 - `_get_candidates(read_only, fallback_master, choose_master_as_replica)` — builds candidates in fallback order: fresh replicas, optional master, known stale replicas, then wait
 - `_get_pool(...)` — **abstract method**, the only thing subclasses must implement
 
-**Import architecture:** The circular import between `pool_manager` and `balancer_policy` is broken by the `PoolStateProvider` protocol in `pool_state.py`. Balancer policies depend on `PoolStateProvider` (direct import from `pool_state.py`, no `TYPE_CHECKING` needed). `BasePoolManager` passes its `_pool_state` attribute (which implements `PoolStateProvider`) to the balancer constructor. Import graph (no cycles): `pool_state.py` → `utils.py`, `abc.py`, `acquire.py`, `metrics.py`, `staleness.py`; `balancer_policy/base.py` → `pool_state.py`; `pool_manager.py` → `pool_state.py`, `balancer_policy/`, `health.py`, `staleness.py`; `health.py` → `pool_manager.py` (TYPE_CHECKING only).
+**Import architecture:** The circular import between `pool_manager` and `balancer_policy` is broken by the `PoolStateProvider` protocol in `pool_state.py`. Balancer policies depend on `PoolStateProvider` (direct import from `pool_state.py`, no `TYPE_CHECKING` needed). `BasePoolManager` passes its `_pool_state` attribute (which implements `PoolStateProvider`) to the balancer constructor. Import graph (no cycles): `pool_state.py` → `utils.py`, `abc.py`, `acquire.py`, `metrics.py`, `staleness.py`; `balancer_policy/base.py` → `pool_state.py`; `pool_manager.py` → `pool_state.py`, `balancer_policy/`, `health.py`, `staleness.py`; `health.py` → `pool_state.py` (runtime import).
 
 **Policies:**
 

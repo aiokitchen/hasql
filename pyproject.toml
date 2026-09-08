@@ -42,6 +42,7 @@ asyncpg = ["asyncpg"]
 asyncpgsa = ["asyncpgsa"]
 psycopg = ["psycopg[pool]>=3,<4"]
 test = [
+  "asyncpgsa",
   "async_timeout",
   "psycopg[pool]>=3.0,<4",
   "aiopg[sa]~=1.4.0",
@@ -53,6 +54,8 @@ test = [
   "aiomisc-pytest~=1.2.1",
   "mock~=5.2",
   "sqlalchemy[asyncio]~=1.4.27",
+  "opentelemetry-sdk>=1.44.0",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.44.0",
 ]
 develop = [
   "async_timeout",

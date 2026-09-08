@@ -59,22 +59,24 @@ class Psycopg3Driver(PoolDriver[AsyncConnectionPool, AsyncConnection]):
         await pool.putconn(connection)
 
     async def is_master(self, connection: AsyncConnection):
-        async with connection.cursor() as cur:
-            await cur.execute("SHOW transaction_read_only")
-            row = await cur.fetchone()
-            if row is None:
-                raise UnexpectedDatabaseResponseError(
-                    "Expected a row from SHOW transaction_read_only",
-                )
-            return row[0] == "off"
+        async with connection.transaction():
+            async with connection.cursor() as cur:
+                await cur.execute("SHOW transaction_read_only")
+                row = await cur.fetchone()
+                if row is None:
+                    raise UnexpectedDatabaseResponseError(
+                        "Expected a row from SHOW transaction_read_only",
+                    )
+                return row[0] == "off"
 
     async def fetch_scalar(self, connection: AsyncConnection, query: str):
-        async with connection.cursor() as cur:
-            await cur.execute(query)
-            row = await cur.fetchone()
-            if row is None:
-                return None
-            return row[0]
+        async with connection.transaction():
+            async with connection.cursor() as cur:
+                await cur.execute(query)
+                row = await cur.fetchone()
+                if row is None:
+                    return None
+                return row[0]
 
     async def pool_factory(self, dsn: Dsn, **kwargs) -> AsyncConnectionPool:
         pool = AsyncConnectionPool(str(dsn), open=False, **kwargs)

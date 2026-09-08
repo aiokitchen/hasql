@@ -2,7 +2,7 @@
 
 Usage:
     OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-    python example/otlp/aiopg.py --dsn postgresql://u:p@db1,db2/mydb
+    python -m example.otlp.aiopg --dsn postgresql://u:p@db1,db2/mydb
 
 Dependencies: hasql, aiopg, opentelemetry-sdk,
               opentelemetry-exporter-otlp-proto-grpc
@@ -13,7 +13,7 @@ import asyncio
 
 from hasql.driver.aiopg import PoolManager
 
-from common import register_hasql_metrics, setup_meter_provider
+from .common import observe_hasql_metrics, setup_meter_provider
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dsn", required=True, help="Multi-host PostgreSQL DSN")
@@ -27,26 +27,28 @@ async def main():
 
     provider = setup_meter_provider(export_interval_ms=args.interval * 1000)
 
-    pool = PoolManager(
-        args.dsn,
-        fallback_master=True,
-        pool_factory_kwargs={"minsize": 2, "maxsize": 10},
-    )
-    await pool.ready()
-    register_hasql_metrics(pool)
-
-    print(f"Exporting metrics every {args.interval}s. Press Ctrl+C to stop.")
     try:
-        while True:
-            async with pool.acquire_master() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT 1")
-            await asyncio.sleep(1)
-    except KeyboardInterrupt:
-        pass
+        pool = PoolManager(
+            args.dsn,
+            fallback_master=True,
+            pool_factory_kwargs={"minsize": 2, "maxsize": 10},
+        )
+        try:
+            await pool.ready()
+            async with observe_hasql_metrics(pool):
+                print(
+                    f"Exporting metrics every {args.interval}s. "
+                    "Press Ctrl+C to stop.",
+                )
+                while True:
+                    async with pool.acquire_master() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute("SELECT 1")
+                    await asyncio.sleep(1)
+        finally:
+            await pool.close()
     finally:
-        await pool.close()
-        provider.shutdown()
+        await asyncio.to_thread(provider.shutdown)
 
 
 if __name__ == "__main__":

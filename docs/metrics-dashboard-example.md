@@ -14,9 +14,23 @@ Datadog, New Relic, etc.) — only the query syntax differs.
 
 ## Metric reference
 
-All gauges are registered by `register_hasql_metrics()` from
-`example/otlp/common.py`. Driver-specific extras require an additional
-`register_extra_gauges()` call.
+Use `async with observe_hasql_metrics(pool, sample_interval=1.0, extra_keys=())`
+from `example/otlp/common.py` around the workload, after `pool.ready()`.
+One initial sample precedes registration; a background task samples once per
+interval on the owning event loop, independently of the workload. Export
+(default: 10 seconds) is independent of sampling (default: 1 second); both
+intervals must be positive and finite. Worker callbacks and manual collection
+read only the latest detached immutable snapshot, never live manager data.
+
+Each callback retains one sample, not an atomic batch across instruments.
+A blocked event loop delays sampling. Sampling errors are logged and clear
+observations until sampling recovers. Missing lag/extra keys are omitted.
+The context stops and awaits sampling before pool close; retain a pool cleanup
+`finally` before readiness and a provider cleanup `finally` before pool creation.
+Use `await asyncio.to_thread(provider.shutdown)` even if pool close fails.
+Final SDK collection can export the last detached sample after sampling stops.
+The example provider bounds export calls to 10 seconds; SDK shutdown defaults
+to 30 seconds. See the README quick start for the complete cleanup structure.
 
 | Gauge name | Labels | Description |
 |---|---|---|
@@ -44,7 +58,7 @@ gauges. `timedelta` values from the `time` lag key are converted to seconds.
 
 ### Driver-specific extra keys
 
-**psycopg3** (`register_extra_gauges(pool, [...])`):
+**psycopg3** (`observe_hasql_metrics(pool, extra_keys=[...])`):
 
 | Key | Description |
 |---|---|
@@ -58,7 +72,7 @@ gauges. `timedelta` values from the `time` lag key are converted to seconds.
 | `returns_bad` | Connections returned in bad state |
 | `usage_ms` | Total connection usage time (ms) |
 
-**SQLAlchemy** (`register_extra_gauges(pool, ["overflow"])`):
+**SQLAlchemy** (`observe_hasql_metrics(pool, extra_keys=("overflow",))`):
 
 | Key | Description |
 |---|---|
@@ -97,8 +111,11 @@ Thresholds:
   - 0                        → red
 ```
 
-When replicas drop to 0, read traffic either falls back to the master
-(if `fallback_master=True`) or fails entirely.
+When fresh replicas drop to 0, reads use an available master if
+`fallback_master=True`; otherwise they can use an available known stale
+replica. With no candidates, acquisition waits up to its timeout. Zero fresh
+replicas does not mean reads fail entirely. Separately,
+`master_as_replica_weight` can include a master alongside fresh replicas.
 
 #### Panel 1.3: Host Health Map (Table)
 
@@ -230,7 +247,7 @@ Right Y-axis: db.pool.connections.used{host="replica-1"}
 
 ### Row 4 — Driver-Specific Panels
 
-These panels require `register_extra_gauges()` and are only relevant
+These panels require `extra_keys` in `observe_hasql_metrics()` and are relevant
 for drivers that expose extra pool internals.
 
 #### Panel 4.1: Queue Depth — psycopg3 (Time Series)
@@ -284,7 +301,7 @@ up to `max_overflow`. When overflow is consistently > 0, the base
 | Rule | Severity | Condition | Meaning |
 |---|---|---|---|
 | No master | Critical | `db.pool.masters == 0` for 30s | All writes will fail |
-| No replicas | Warning | `db.pool.replicas == 0` for 1m | Reads fall back to master or fail |
+| No replicas | Warning | `db.pool.replicas == 0` for 1m | Reads use master/stale fallback or wait up to acquire timeout |
 | Pool near exhaustion | Warning | `used / max > 0.9` for 1m | Pool running out of connections |
 | Host unhealthy | Warning | `db.pool.healthy == 0` for 1m | Host lost its detected role |
 | High health-check latency | Warning | `health_check.duration > 0.5s` for 2m | Host may be degrading |
@@ -410,12 +427,14 @@ See the per-driver OTLP scripts in `example/otlp/`:
 | `aiopg_sa.py` | aiopg + SQLAlchemy | — |
 | `asyncsqlalchemy.py` | SQLAlchemy async | `overflow` |
 
-Each script creates a `PoolManager`, registers metrics, and runs a
-simple workload loop so you can see data flowing into your collector.
+Each script creates a `PoolManager`, samples metrics within the observation
+context, and runs a workload loop. Sampling stops before pool cleanup; provider
+shutdown runs off-loop. Run from the repository checkout as a module to avoid
+shadowing driver packages with script filenames.
 
 ```bash
 # Start the collector (e.g. Grafana Alloy, OTel Collector, etc.)
 # Then run any example:
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-  python example/otlp/asyncpg.py --dsn postgresql://u:p@db1,db2/mydb
+  python -m example.otlp.asyncpg --dsn postgresql://u:p@db1,db2/mydb
 ```

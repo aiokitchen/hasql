@@ -16,9 +16,11 @@ def make_dsn():
 @pytest.fixture
 async def pool_manager(make_dsn):
     pm = TestPoolManager(make_dsn(replicas=2))
-    await pm.ready(masters_count=1, replicas_count=2)
-    yield pm
-    await pm.close()
+    try:
+        await pm.ready(masters_count=1, replicas_count=2)
+        yield pm
+    finally:
+        await pm.close()
 
 
 async def test_pool_state_stale_pool_set_empty_by_default(pool_manager):
@@ -51,43 +53,47 @@ async def test_balancer_prefers_fresh_over_stale():
     """When fresh replicas exist, stale replicas are not selected."""
     dsn = "postgresql://test:test@master,replica0,replica1:5432/test"
     pm = TestPoolManager(dsn)
-    await pm.ready(masters_count=1, replicas_count=2)
+    try:
+        await pm.ready(masters_count=1, replicas_count=2)
 
-    ps = pm._pool_state
-    # Move one replica to stale set manually
-    replica_pools = list(ps._replica_pool_set)
-    stale_pool = replica_pools[0]
-    fresh_pool = replica_pools[1]
-    ps._replica_pool_set.discard(stale_pool)
-    ps._stale_pool_set.add(stale_pool)
+        ps = pm._pool_state
+        # Move one replica to stale set manually
+        replica_pools = list(ps._replica_pool_set)
+        stale_pool = replica_pools[0]
+        fresh_pool = replica_pools[1]
+        ps._replica_pool_set.discard(stale_pool)
+        ps._stale_pool_set.add(stale_pool)
 
-    # Acquire should get the fresh pool
-    async with pm.acquire_replica() as conn:
-        assert conn._pool is fresh_pool
+        # Acquire should get the fresh pool
+        async with pm.acquire_replica() as conn:
+            assert conn._pool is fresh_pool
 
-    await pm.close()
+    finally:
+        await pm.close()
 
 
 async def test_balancer_falls_back_to_stale():
     """When no fresh replicas or masters, falls back to stale."""
     dsn = "postgresql://test:test@master,replica0:5432/test"
     pm = TestPoolManager(dsn)
-    await pm.ready(masters_count=1, replicas_count=1)
+    try:
+        await pm.ready(masters_count=1, replicas_count=1)
 
-    ps = pm._pool_state
-    # Move all replicas to stale
-    replica_pools = list(ps._replica_pool_set)
-    for pool in replica_pools:
-        ps._replica_pool_set.discard(pool)
-        ps._stale_pool_set.add(pool)
+        ps = pm._pool_state
+        # Move all replicas to stale
+        replica_pools = list(ps._replica_pool_set)
+        for pool in replica_pools:
+            ps._replica_pool_set.discard(pool)
+            ps._stale_pool_set.add(pool)
 
-    # Also remove master to test stale-only fallback
-    master_pools = list(ps._master_pool_set)
-    for pool in master_pools:
-        ps._master_pool_set.discard(pool)
+        # Also remove master to test stale-only fallback
+        master_pools = list(ps._master_pool_set)
+        for pool in master_pools:
+            ps._master_pool_set.discard(pool)
 
-    # Should fall back to stale
-    async with pm.acquire_replica() as conn:
-        assert conn._pool in ps._stale_pool_set
+        # Should fall back to stale
+        async with pm.acquire_replica() as conn:
+            assert conn._pool in ps._stale_pool_set
 
-    await pm.close()
+    finally:
+        await pm.close()

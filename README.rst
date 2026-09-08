@@ -491,20 +491,53 @@ Use the helper from ``example/otlp/common.py``:
 
 .. code-block:: python
 
+    import asyncio
+
     from hasql.driver.asyncpg import PoolManager
     from example.otlp.common import (
-        register_hasql_metrics,
+        observe_hasql_metrics,
         setup_meter_provider,
     )
 
-    provider = setup_meter_provider(export_interval_ms=10_000)
+    async def main(dsn):
+        provider = setup_meter_provider(export_interval_ms=10_000)
+        try:
+            pool = PoolManager(dsn, fallback_master=True)
+            try:
+                await pool.ready()
+                async with observe_hasql_metrics(pool, sample_interval=1.0):
+                    while True:
+                        async with pool.acquire_master() as conn:
+                            await conn.fetchval("SELECT 1")
+                        await asyncio.sleep(1)
+            finally:
+                await pool.close()
+        finally:
+            await asyncio.to_thread(provider.shutdown)
 
-    pool = PoolManager(dsn, fallback_master=True)
-    await pool.ready()
+The helper samples ``metrics()`` once on the owning event loop before
+registration and then every ``sample_interval`` seconds (default: 1).
+OTel callbacks read only a detached immutable snapshot, never the live manager.
+Export runs independently (default: 10 seconds); both intervals must be positive
+and finite. Manual collection also reads the latest sample, not live state.
+Each callback retains one snapshot; a collection across instruments is not an
+atomic batch. A blocked event loop delays sampling. Sampling errors are logged
+and clear observations until the next successful sample. Acquire counters stay
+cumulative; missing lag and selected extra keys produce no observation.
 
-    # Registers observable gauges — OTel calls metrics()
-    # automatically at each export interval
-    register_hasql_metrics(pool)
+Pass ``extra_keys=("overflow",)`` for SQLAlchemy extras, or selected psycopg3
+keys, to the same helper. It stops and awaits its sampler before pool cleanup;
+the provider is owned by the caller and shut down off-loop even if cleanup
+fails. Final SDK collection may use the last detached sample after sampling
+stops. Export calls have a 10-second timeout; SDK shutdown defaults to 30 seconds.
+
+Run the scripts as modules from the repository checkout (direct script paths
+can shadow driver packages):
+
+.. code-block:: bash
+
+    python -m example.otlp.asyncpg --dsn postgresql://u:p@db1,db2/mydb
+
 
 Exported OTel instruments
 *************************
@@ -572,19 +605,18 @@ Driver-specific extras
 **********************
 
 Some drivers expose additional pool internals via ``PoolMetrics.extra``.
-Use ``register_extra_gauges()`` to export them as OTel gauges:
+Pass ``extra_keys`` to the observation context in the quick start above:
 
 .. code-block:: python
 
-    from example.otlp.common import register_extra_gauges
-
     # psycopg3: queue depth, error counters, etc.
-    register_extra_gauges(pool, [
-        "pool_size", "requests_waiting", "connections_errors",
-    ])
+    extra_keys = ("pool_size", "requests_waiting", "connections_errors")
 
-    # SQLAlchemy: overflow connections
-    register_extra_gauges(pool, ["overflow"])
+    # Or, for SQLAlchemy: overflow connections
+    extra_keys = ("overflow",)
+
+    async with observe_hasql_metrics(pool, extra_keys=extra_keys):
+        ...  # application workload
 
 Per-driver examples live in ``example/otlp/``.
 
@@ -642,8 +674,11 @@ The exported metrics map well to Grafana / Datadog dashboard panels:
 **Alerting rules**
 
 * ``db.pool.masters == 0`` — **critical**: no master available
-* ``db.pool.replicas == 0`` — **warning**: all reads will fall back
-  to master (if ``fallback_master=True``) or fail
+* ``db.pool.replicas == 0`` — **warning**: no fresh replicas; reads use
+  an available master if fallback is enabled, otherwise an available known
+  stale replica. With no candidates, acquisition waits up to its timeout.
+  Separately, ``master_as_replica_weight`` can include a master alongside
+  fresh replicas
 * ``db.pool.connections.used / db.pool.connections.max > 0.9`` —
   **warning**: pool near exhaustion
 * ``db.pool.health_check.duration > threshold`` — **warning**: host

@@ -237,7 +237,7 @@ async def test_time_staleness_checker_with_expired_master_state_fails_open():
 
     assert (result, driver.queries) == (
         StalenessCheckResult(is_stale=False, lag={}),
-        ["SELECT pg_current_wal_lsn()"],
+        ["SELECT pg_current_wal_lsn()::text"],
     )
 
 
@@ -256,8 +256,8 @@ async def test_time_staleness_checker_equal_lsn_ignores_old_transaction():
             lag={"time": timedelta(0)},
         ),
         [
-            "SELECT pg_current_wal_lsn()",
-            "SELECT pg_last_wal_replay_lsn()",
+            "SELECT pg_current_wal_lsn()::text",
+            "SELECT pg_last_wal_replay_lsn()::text",
         ],
     )
 
@@ -275,8 +275,8 @@ async def test_time_staleness_checker_different_lsn_uses_replay_time():
     assert (result, driver.queries) == (
         StalenessCheckResult(is_stale=True, lag={"time": lag}),
         [
-            "SELECT pg_current_wal_lsn()",
-            "SELECT pg_last_wal_replay_lsn()",
+            "SELECT pg_current_wal_lsn()::text",
+            "SELECT pg_last_wal_replay_lsn()::text",
             "SELECT clock_timestamp() - pg_last_xact_replay_timestamp()",
         ],
     )
@@ -305,7 +305,7 @@ async def test_time_staleness_checker_malformed_master_lsn_is_stale():
 
     assert (result, driver.queries) == (
         StalenessCheckResult(is_stale=True, lag={}),
-        ["SELECT pg_current_wal_lsn()"],
+        ["SELECT pg_current_wal_lsn()::text"],
     )
 
 
@@ -937,3 +937,36 @@ async def test_existing_master_is_removed_after_collection_fails():
         None,
         True,
     )
+
+
+@pytest.mark.parametrize(
+    "checker_factory,checker_kwargs",
+    [
+        pytest.param(BytesStalenessChecker, {"max_lag_bytes": 0}, id="bytes"),
+        pytest.param(
+            TimeStalenessChecker, {"max_lag": timedelta(seconds=1)}, id="time",
+        ),
+    ],
+)
+async def test_collect_master_state_requests_driver_independent_text_lsn(
+    checker_factory, checker_kwargs,
+):
+    driver = ScalarSequenceDriver(["0/2000000"])
+    ctx = CheckContext(connection=MockConnection(), driver=driver)
+    checker = checker_factory(**checker_kwargs)
+
+    await checker.collect_master_state(ctx)
+
+    assert driver.queries == ["SELECT pg_current_wal_lsn()::text"]
+
+
+async def test_time_checker_requests_replay_lsn_as_text_for_comparison():
+    driver = ScalarSequenceDriver(["0/2000000", "0/2000000"])
+    ctx = CheckContext(connection=MockConnection(), driver=driver)
+    checker = TimeStalenessChecker(max_lag=timedelta(seconds=1))
+    await checker.collect_master_state(ctx)
+    driver.queries.clear()
+
+    await checker.check(ctx)
+
+    assert driver.queries == ["SELECT pg_last_wal_replay_lsn()::text"]

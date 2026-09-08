@@ -51,7 +51,7 @@ class BytesStalenessChecker(BaseStalenessChecker):
 
     async def collect_master_state(self, ctx: CheckContext) -> None:
         self._master_lsn = await ctx.fetch_scalar(
-            "SELECT pg_current_wal_lsn()",
+            "SELECT pg_current_wal_lsn()::text",
         )
         self._master_lsn_updated_at = time.monotonic()
 
@@ -91,7 +91,7 @@ class TimeStalenessChecker(BaseStalenessChecker):
 
     async def collect_master_state(self, ctx: CheckContext) -> None:
         self._master_lsn = await ctx.fetch_scalar(
-            "SELECT pg_current_wal_lsn()",
+            "SELECT pg_current_wal_lsn()::text",
         )
         self._master_lsn_updated_at = time.monotonic()
 
@@ -107,7 +107,7 @@ class TimeStalenessChecker(BaseStalenessChecker):
             return StalenessCheckResult(is_stale=True, lag={})
 
         replica_lsn = await ctx.fetch_scalar(
-            "SELECT pg_last_wal_replay_lsn()",
+            "SELECT pg_last_wal_replay_lsn()::text",
         )
         if replica_lsn == self._master_lsn:
             return StalenessCheckResult(

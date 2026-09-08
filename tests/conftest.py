@@ -46,8 +46,10 @@ async def setup_aiopg(pg_dsn):
     from hasql.driver.aiopg import PoolManager
 
     pool = PoolManager(dsn=pg_dsn, fallback_master=True)
-    yield pool
-    await pool.close()
+    try:
+        yield pool
+    finally:
+        await pool.close()
 
 
 @asynccontextmanager
@@ -55,8 +57,10 @@ async def setup_aiopgsa(pg_dsn):
     from hasql.driver.aiopg_sa import PoolManager
 
     pool = PoolManager(dsn=pg_dsn, fallback_master=True)
-    yield pool
-    await pool.close()
+    try:
+        yield pool
+    finally:
+        await pool.close()
 
 
 @asynccontextmanager
@@ -64,8 +68,10 @@ async def setup_asyncpg(pg_dsn):
     from hasql.driver.asyncpg import PoolManager
 
     pool = PoolManager(dsn=pg_dsn, fallback_master=True)
-    yield pool
-    await pool.close()
+    try:
+        yield pool
+    finally:
+        await pool.close()
 
 
 @asynccontextmanager
@@ -73,8 +79,10 @@ async def setup_asyncsqlalchemy(pg_dsn):
     from hasql.driver.asyncsqlalchemy import PoolManager
 
     pool = PoolManager(dsn=pg_dsn, fallback_master=True)
-    yield pool
-    await pool.close()
+    try:
+        yield pool
+    finally:
+        await pool.close()
 
 
 @asynccontextmanager
@@ -82,5 +90,7 @@ async def setup_psycopg3(pg_dsn):
     from hasql.driver.psycopg3 import PoolManager
 
     pool = PoolManager(dsn=pg_dsn, fallback_master=True)
-    yield pool
-    await pool.close()
+    try:
+        yield pool
+    finally:
+        await pool.close()

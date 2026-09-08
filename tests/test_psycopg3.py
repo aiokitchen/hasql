@@ -5,10 +5,12 @@ import mock
 import pytest
 pytest.importorskip("psycopg")
 pytest.importorskip("psycopg_pool")
-from psycopg import AsyncConnection
+from psycopg import AsyncConnection, errors
+from psycopg.pq import TransactionStatus
+from psycopg.rows import tuple_row
 from psycopg_pool import PoolTimeout, TooManyRequests
 
-from hasql.driver.psycopg3 import PoolManager
+from hasql.driver.psycopg3 import PoolManager, Psycopg3Driver
 
 
 @pytest.fixture
@@ -154,3 +156,153 @@ async def test_metrics(pool_manager):
         assert p.healthy is True
         assert p.in_flight == 1
         assert "pool_size" in p.extra
+
+
+async def _role_probe(driver, connection):
+    return await driver.is_master(connection)
+
+
+async def _scalar_probe(driver, connection):
+    return await driver.fetch_scalar(connection, "SELECT 1")
+
+
+_PROBES = [
+    pytest.param(_role_probe, True, id="is-master"),
+    pytest.param(_scalar_probe, 1, id="fetch-scalar"),
+]
+
+
+@pytest.mark.parametrize("probe,expected", _PROBES)
+@pytest.mark.parametrize("autocommit", [False, True])
+async def test_health_probe_finishes_its_own_transaction(
+    pg_dsn, probe, expected, autocommit,
+):
+    driver = Psycopg3Driver()
+    async with await AsyncConnection.connect(
+        pg_dsn, autocommit=autocommit,
+    ) as connection:
+        result = await probe(driver, connection)
+        status = connection.info.transaction_status
+
+    assert (result, status) == (expected, TransactionStatus.IDLE)
+
+
+@pytest.mark.parametrize("autocommit", [False, True])
+async def test_scalar_probe_error_rolls_back_owned_transaction(
+    pg_dsn, autocommit,
+):
+    driver = Psycopg3Driver()
+    async with await AsyncConnection.connect(
+        pg_dsn, autocommit=autocommit,
+    ) as connection:
+        with pytest.raises(errors.DivisionByZero):
+            await driver.fetch_scalar(connection, "SELECT 1 / 0")
+        status_after_error = connection.info.transaction_status
+        result = await driver.fetch_scalar(connection, "SELECT 1")
+        status_after_reuse = connection.info.transaction_status
+
+    assert (status_after_error, result, status_after_reuse) == (
+        TransactionStatus.IDLE, 1, TransactionStatus.IDLE,
+    )
+
+
+def _failing_row_factory(cursor):
+    # Exercise a real SHOW/cursor fetch failure via psycopg's public row-factory
+    # hook, without replacing the connection, cursor, driver, or SQL transport.
+    def fail_row(values):
+        raise ValueError("probe row conversion failed")
+
+    return fail_row
+
+
+@pytest.mark.parametrize("autocommit", [False, True])
+async def test_role_probe_row_error_rolls_back_owned_transaction(
+    pg_dsn, autocommit,
+):
+    driver = Psycopg3Driver()
+    async with await AsyncConnection.connect(
+        pg_dsn, autocommit=autocommit, row_factory=_failing_row_factory,
+    ) as connection:
+        with pytest.raises(ValueError, match="probe row conversion failed"):
+            await driver.is_master(connection)
+        status_after_error = connection.info.transaction_status
+        connection.row_factory = tuple_row
+        result = await driver.is_master(connection)
+        status_after_reuse = connection.info.transaction_status
+
+    assert (status_after_error, result, status_after_reuse) == (
+        TransactionStatus.IDLE, True, TransactionStatus.IDLE,
+    )
+
+
+async def _set_caller_marker(connection):
+    # Transaction-local GUC, not persistent test data. A driver-wide commit or
+    # rollback would discard it and violate caller transaction ownership.
+    await connection.execute(
+        "SELECT set_config('hasql.probe_marker', 'caller-owned', true)",
+    )
+
+
+async def _caller_marker(connection):
+    cursor = await connection.execute(
+        "SELECT current_setting('hasql.probe_marker')",
+    )
+    return (await cursor.fetchone())[0]
+
+
+@pytest.mark.parametrize("probe,expected", _PROBES)
+@pytest.mark.parametrize("autocommit", [False, True])
+async def test_health_probe_preserves_uncommitted_caller_transaction(
+    pg_dsn, probe, expected, autocommit,
+):
+    driver = Psycopg3Driver()
+    async with await AsyncConnection.connect(
+        pg_dsn, autocommit=autocommit,
+    ) as connection:
+        async with connection.transaction(force_rollback=True):
+            await _set_caller_marker(connection)
+            result = await probe(driver, connection)
+            status = connection.info.transaction_status
+            marker = await _caller_marker(connection)
+
+    assert (result, status, marker) == (
+        expected, TransactionStatus.INTRANS, "caller-owned",
+    )
+
+
+@pytest.mark.parametrize("autocommit", [False, True])
+async def test_scalar_probe_error_preserves_usable_caller_transaction(
+    pg_dsn, autocommit,
+):
+    driver = Psycopg3Driver()
+    async with await AsyncConnection.connect(
+        pg_dsn, autocommit=autocommit,
+    ) as connection:
+        async with connection.transaction(force_rollback=True):
+            await _set_caller_marker(connection)
+            with pytest.raises(errors.DivisionByZero):
+                await driver.fetch_scalar(connection, "SELECT 1 / 0")
+            status = connection.info.transaction_status
+            marker = await _caller_marker(connection)
+
+    assert (status, marker) == (TransactionStatus.INTRANS, "caller-owned")
+
+
+@pytest.mark.parametrize("autocommit", [False, True])
+async def test_role_probe_row_error_preserves_usable_caller_transaction(
+    pg_dsn, autocommit,
+):
+    driver = Psycopg3Driver()
+    async with await AsyncConnection.connect(
+        pg_dsn, autocommit=autocommit,
+    ) as connection:
+        async with connection.transaction(force_rollback=True):
+            await _set_caller_marker(connection)
+            connection.row_factory = _failing_row_factory
+            with pytest.raises(ValueError, match="probe row conversion failed"):
+                await driver.is_master(connection)
+            status = connection.info.transaction_status
+            connection.row_factory = tuple_row
+            marker = await _caller_marker(connection)
+
+    assert (status, marker) == (TransactionStatus.INTRANS, "caller-owned")
